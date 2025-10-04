@@ -71,7 +71,7 @@ Defines the configuration schema and discovery mechanisms for projects within Gi
 - Project discovery mechanisms
 - Repository-level settings management
 - Deployment specification validation
-- Configuration to Kubernetes resource transformation
+- Configuration to Kubernetes resource transformation (primarily XRDs)
 
 #### Artifacts Component
 Manages build outputs and their publication to registries during the release phase. All artifacts are tracked using OCI images for universal provenance and metadata management.
@@ -84,7 +84,9 @@ Manages build outputs and their publication to registries during the release pha
 - Registry credential management
 
 #### Release & Deployment Component
-Creates point-in-time snapshots of projects including their Kubernetes resource definitions (KRDs). While projects can specify any valid Kubernetes resources, they primarily leverage platform-provided Crossplane Composite Resources (XRs) for standard patterns. Integrates with Argo CD for GitOps-based deployments.
+Creates point-in-time snapshots of projects including their Kubernetes resource definitions (KRDs). Projects primarily leverage platform-provided Crossplane Composite Resources (XRs) defined in the infrastructure abstractions catalog, though raw Kubernetes resources are also supported. Integrates with Argo CD for GitOps-based deployments.
+
+For infrastructure abstraction specifications, see [Infrastructure Abstractions](08-infrastructure-abstractions.md).
 
 **Key Responsibilities**:
 - Release trigger evaluation
@@ -199,6 +201,8 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 
 4. **Crossplane for resource composition** - CNCF-graduated solution for abstracting Kubernetes complexity through Composite Resources
 
+   Platform provides curated XRD catalog with smart defaults. See [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog) for complete specifications.
+
 5. **GitHub Actions as trigger** - Native integration with existing SCM and zero infrastructure overhead
 
 6. **Argo Workflows for orchestration** - Kubernetes-native workflow orchestration with built-in UI and retry logic
@@ -215,7 +219,7 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 
 11. **Kubernetes operators** - Self-healing, declarative infrastructure using platform-native patterns
 
-12. **Environment-agnostic releases** - Same release (containing KRDs) deploys to any environment via EnvironmentConfig for XRs
+12. **Environment-agnostic releases** - Same release (containing KRDs) deploys to any environment via two-tier EnvironmentConfig system for XRs. See [Infrastructure Abstractions: Environment Configuration Model](08-infrastructure-abstractions.md#environment-configuration-model).
 
 13. **Hot worker pools** - Persistent pods with cached repositories and warm connections to eliminate cold start penalties
 
@@ -814,6 +818,12 @@ This document defines shared concepts that are consumed by all components. For s
 - **GitOps Repository Structure**: Used by Release component for deployment management
 - **Secret Management**: Used by all components for credential management
 - **Authentication Model**: Enforced across all API boundaries
+
+**How Components Use Infrastructure Abstractions**:
+- Projects declare XRs in deployment configuration using familiar abstractions (secrets, configs, DNS)
+- Release component packages XRs alongside raw Kubernetes resources in Release OCI images
+- Crossplane composition functions apply environment-specific configuration during deployment
+- See [Infrastructure Abstractions](08-infrastructure-abstractions.md) for complete XRD catalog and patterns
 
 ## Reference
 

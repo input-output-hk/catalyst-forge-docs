@@ -138,11 +138,44 @@ This document defines clear ownership boundaries for each architectural document
 - OCI format standards (owned by Core Architecture)
 - Pipeline execution of release steps (owned by Execution & Orchestration)
 - Release domain entities and APIs (owned by Domain Model & API Reference)
+- Infrastructure abstractions and XRD specifications (owned by Infrastructure Abstractions)
 
 **References**:
 - Core Architecture for OCI formats and GitOps structure
 - Integration Contracts for pipeline → release and release → GitOps interactions
 - Domain Model & API Reference for release entities and APIs
+- Infrastructure Abstractions for XRD catalog and environment configuration
+
+---
+
+### 08-infrastructure-abstractions.md
+**Owner**: Platform Core Team
+
+**Owns**:
+- Crossplane XRD catalog and specifications
+- Environment configuration model (EnvironmentConfig two-tier system)
+- Universal reference pattern (`<type>/<name>/[field]`)
+- Namespace strategy (`{repository}-{project}` pattern)
+- Deployment resolution process and precedence rules
+- XRD design philosophy and composability patterns
+- Integration specifications for:
+  - External Secrets Operator
+  - External DNS
+  - Envoy Gateway
+  - EBS CSI Driver
+- Crossplane composition function requirements
+
+**Does NOT Own**:
+- Project deployment configuration syntax (owned by Configuration & Discovery)
+- Release packaging and OCI formats (owned by Core Architecture)
+- Kubernetes resource rendering from CUE (owned by Release & Deployment)
+- Platform operators' general patterns (owned by Core Architecture)
+
+**References**:
+- Core Architecture for shared infrastructure patterns
+- Configuration & Discovery for project deployment syntax
+- Release & Deployment for KRD rendering and packaging
+- Integration Contracts for component interactions
 
 ---
 

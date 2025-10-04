@@ -110,7 +110,8 @@ Release Component
     → Argo CD (detects change)
     → Custom Management Plugin (fetch Release OCI)
     → Kubernetes (apply resources)
-    → Crossplane (reconcile XRs)
+    → Crossplane (reconcile XRs with EnvironmentConfigs)
+    → Platform Operators (External Secrets, External DNS, Envoy Gateway)
 ```
 
 ## Architecture
@@ -339,6 +340,37 @@ Output (Plugin provides to Argo CD):
 
 **Reference**: [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure)
 
+#### Crossplane → Platform XRDs
+
+**Contract**: XRD Composition and Environment Resolution
+
+**Interaction**: Crossplane reconciles platform XRDs using composition functions and EnvironmentConfigs
+
+**Data Flow**:
+```
+Input (from Release OCI image):
+- XR instances with project-specified values
+- Environment-agnostic configuration
+
+Input (from GitOps repository):
+- Cluster-wide EnvironmentConfig (env.yml)
+- Per-project EnvironmentConfig overrides (env.yml per project)
+
+Output (Crossplane generates):
+- Kubernetes resources with environment-specific values
+- Applied resolution precedence:
+  1. Per-project override
+  2. XRD spec value
+  3. Cluster-wide default
+  4. Composition default
+```
+
+**Integration Point**: Crossplane composition functions (Python-based)
+
+**Error Handling**: Composition failures surface in Kubernetes events and Crossplane status conditions
+
+**Reference**: [Infrastructure Abstractions: Deployment Resolution Process](08-infrastructure-abstractions.md#deployment-resolution-process)
+
 ### Shared Infrastructure Usage
 
 #### AWS Services
@@ -559,6 +591,33 @@ task-cache:
 - NOT used for user secrets (AWS Secrets Manager preferred)
 
 **Reference**: Component-specific deployment configurations
+
+##### Crossplane Composite Resources
+
+**Purpose**: Platform infrastructure abstractions
+
+**Consumers**:
+- Projects (declare XRs in deployment configuration)
+- Crossplane (reconciles XRs to Kubernetes resources)
+- Platform operators (External Secrets, External DNS, Envoy Gateway)
+
+**XRD Catalog**:
+See [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog) for complete specifications:
+- Deployment (stateless services)
+- Stateful (persistent identity services)
+- Job (one-time tasks)
+- CronJob (scheduled tasks)
+- Network (service exposure & DNS)
+- Secrets (external secrets sync)
+- ConfigMaps (application configuration)
+- Storage (persistent volumes)
+
+**Environment Configuration**:
+- Cluster-wide defaults in `<env>/env.yml`
+- Per-project overrides in `<env>/<repo>-<project>/env.yml`
+- Resolution with clear precedence rules
+
+**Reference**: [Infrastructure Abstractions](08-infrastructure-abstractions.md)
 
 #### OCI Registries
 

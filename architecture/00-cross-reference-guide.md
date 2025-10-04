@@ -319,6 +319,9 @@ KRD generation involves multiple system components:
 | GitOps structure | [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure) |
 | Secret management | [Core Architecture: Secret Management Patterns](01-core-architecture.md#secret-management-patterns) |
 | Authentication | [Core Architecture: Authentication & Authorization Model](01-core-architecture.md#authentication--authorization-model) |
+| Infrastructure abstractions | [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog) |
+| Environment configuration | [Infrastructure Abstractions: Environment Configuration Model](08-infrastructure-abstractions.md#environment-configuration-model) |
+| Resource references | [Infrastructure Abstractions: Universal Reference Pattern](08-infrastructure-abstractions.md#universal-reference-pattern) |
 | Component interactions | [Integration Contracts](07-integration-contracts.md) |
 | Entity definitions | [Domain Model & API Reference: Domain Entity Catalog](06-domain-model-api-reference.md#domain-entity-catalog) |
 | API specifications | [Domain Model & API Reference: API Specifications](06-domain-model-api-reference.md#api-specifications-by-domain) |

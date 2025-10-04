@@ -201,32 +201,38 @@ Steps within a phase run in parallel by default. Use the `priority` field to enf
 
 **Deployment Configuration**
 
-Projects specify Kubernetes resources for deployment as raw KRDs:
+Projects specify Kubernetes resources for deployment, primarily using platform-provided XRDs from the infrastructure abstractions catalog:
 
 ```cue
 deployment?: {
     resources: [
         {
-            apiVersion: "webapp.platform.io/v1alpha1"
-            kind: "WebApplication"
+            apiVersion: "forge.io/v1"
+            kind: "Deployment"
             metadata: {
-                name: "my-app"
+                name: "myapp-web"
             }
             spec: {
-                compositionRevision: "v1.2.0"  // XRD version pinning
-                image: @artifact("api-server.publishers.ecr.uri")
+                containers: [
+                    {
+                        name: "web"
+                        image: @artifact("web.uri")
+                        ports: [{containerPort: 8080}]
+                    }
+                ]
                 replicas: 3
             }
         },
         {
-            apiVersion: "v1"
-            kind: "ConfigMap"
+            apiVersion: "forge.io/v1"
+            kind: "Network"
             metadata: {
-                name: "my-config"
-                namespace: "default"
+                name: "myapp-network"
             }
-            data: {
-                "config.yaml": "..."
+            spec: {
+                workloadRef: "myapp-web"
+                subdomain: "myapp"
+                port: 8080
             }
         }
     ]
@@ -234,9 +240,11 @@ deployment?: {
 ```
 
 Resources can include:
-- Crossplane Composite Resources (XRs)
+- Platform XRDs from infrastructure abstractions catalog (recommended)
 - Standard Kubernetes resources
 - Mix of both in the same array
+
+For the complete XRD catalog and specifications, see [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog).
 
 **Release Configuration**
 
@@ -391,9 +399,11 @@ The CLI provides local validation commands:
 Projects have zero awareness of deployment environments:
 
 - No environment-specific values in project configuration
-- Crossplane EnvironmentConfigs handle environment specifics during deployment
+- Two-tier EnvironmentConfig system provides cluster-wide and per-project overrides
 - Releases are environment-agnostic snapshots
 - XRDs designed to accept only environment-independent inputs
+
+For complete environment configuration specifications, see [Infrastructure Abstractions: Environment Configuration Model](08-infrastructure-abstractions.md#environment-configuration-model).
 
 ## Configuration
 
@@ -432,6 +442,8 @@ The CLI provides:
 ## Integration Points
 
 For OCI formats and GitOps structure, see [Core Architecture: OCI Image Formats](01-core-architecture.md#oci-image-formats) and [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
+
+For infrastructure abstractions and XRD specifications, see [Infrastructure Abstractions](08-infrastructure-abstractions.md).
 
 For pipeline discovery integration, see [Execution & Orchestration: Discovery](03-execution-orchestration.md#discovery).
 

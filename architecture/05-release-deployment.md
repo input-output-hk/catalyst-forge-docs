@@ -13,7 +13,9 @@ Every release represents an immutable snapshot of a project at a specific commit
 
 #### Environment Agnosticism
 
-Releases contain no environment-specific configuration. They package universal Kubernetes resource definitions that work across all environments, with Crossplane EnvironmentConfigs providing environment-specific values during deployment. This separation enables the same release to deploy to development, staging, and production without modification.
+Releases contain no environment-specific configuration. They package universal Kubernetes resource definitions that work across all environments. The platform's two-tier EnvironmentConfig system (cluster-wide and per-project) provides environment-specific values during deployment, with clear precedence rules. This separation enables the same release to deploy to development, staging, and production without modification.
+
+For complete environment configuration specifications, see [Infrastructure Abstractions: Environment Configuration Model](08-infrastructure-abstractions.md#environment-configuration-model).
 
 #### Policy-Driven Deployment
 
@@ -130,6 +132,15 @@ Kubernetes Resource Definitions are generated from CUE during the release phase:
 2. Deployment resources extracted and converted to JSON/YAML
 3. Resources packaged into Release OCI image
 4. Argo CD extracts resources during deployment
+
+**XRD Resolution**: When XRDs from the infrastructure abstractions catalog are included, Crossplane handles value resolution during deployment:
+
+1. XRDs rendered with project-specified values
+2. EnvironmentConfigs loaded (cluster-wide and per-project)
+3. Values resolved per precedence: per-project override → XRD spec → cluster default → composition default
+4. Resources applied to cluster with environment-appropriate configuration
+
+For XRD specifications and resolution process, see [Infrastructure Abstractions: Deployment Resolution Process](08-infrastructure-abstractions.md#deployment-resolution-process).
 
 #### Idempotency
 
@@ -304,6 +315,10 @@ Complete audit logging includes:
 For release OCI format standards, see [Core Architecture: OCI Image Formats](01-core-architecture.md#oci-image-formats).
 
 For GitOps repository structure, see [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
+
+For infrastructure abstraction XRDs and environment configuration, see [Infrastructure Abstractions](08-infrastructure-abstractions.md).
+
+For Crossplane composition function requirements, see [Infrastructure Abstractions: Composition Functions](08-infrastructure-abstractions.md#composition-functions).
 
 For pipeline and artifact integration, see [Execution & Orchestration](03-execution-orchestration.md) and [Build & Distribution](04-build-distribution.md).
 

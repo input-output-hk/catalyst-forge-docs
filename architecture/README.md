@@ -51,6 +51,24 @@ Single source of truth for system-wide concepts and shared patterns.
 - Need to understand cross-cutting concerns
 - Working with shared infrastructure
 
+#### [08-infrastructure-abstractions.md](08-infrastructure-abstractions.md)
+**Owner**: Platform Core
+
+Defines the Crossplane-based infrastructure abstractions for platform deployments.
+
+**Key Topics**:
+- XRD catalog and design philosophy
+- Environment configuration model (two-tier EnvironmentConfig)
+- Universal reference pattern for resources
+- Namespace strategy and deployment resolution
+- Integration with External Secrets, External DNS, and Envoy Gateway
+
+**Read this when**:
+- Configuring deployment resources for projects
+- Understanding how XRDs abstract Kubernetes complexity
+- Working with environment-specific configuration
+- Designing new infrastructure abstractions
+
 ---
 
 ### Component Specifications
@@ -183,7 +201,8 @@ Defines all component interactions and integration patterns.
 1. [Core Architecture](01-core-architecture.md) - Understand the platform
 2. [Configuration & Discovery](02-configuration-discovery.md) - Learn how projects work
 3. [Execution & Orchestration](03-execution-orchestration.md) - Understand pipeline execution
-4. [Domain Model & API Reference](06-domain-model-api-reference.md) - Learn the domain model
+4. [Infrastructure Abstractions](08-infrastructure-abstractions.md) - Learn deployment abstractions
+5. [Domain Model & API Reference](06-domain-model-api-reference.md) - Learn the domain model
 
 #### Platform Operator
 **Recommended Reading Order**:
@@ -222,6 +241,11 @@ Defines all component interactions and integration patterns.
 2. [Release & Deployment: GitOps Integration](05-release-deployment.md#gitops-integration)
 3. [Release & Deployment: Environment Promotion](05-release-deployment.md#environment-promotion)
 
+#### Configuring Deployment Resources
+1. [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog)
+2. [Infrastructure Abstractions: Configuration Example](08-infrastructure-abstractions.md#configuration-example)
+3. [Configuration & Discovery: Deployment Configuration](02-configuration-discovery.md#project-configuration-schema)
+
 #### Looking Up an API
 1. [Domain Model & API Reference: API Specifications by Domain](06-domain-model-api-reference.md#api-specifications-by-domain)
 2. Navigate to specific API section (Pipeline, Release, Deployment, etc.)
@@ -247,6 +271,7 @@ Defines all component interactions and integration patterns.
 | Pipeline Execution | [Execution & Orchestration: Pipeline Architecture](03-execution-orchestration.md#pipeline-architecture) |
 | Artifact Publishing | [Build & Distribution: Publisher Contract](04-build-distribution.md#publisher-contract--registry-types) |
 | Release Process | [Release & Deployment: Release Creation Workflow](05-release-deployment.md#release-creation-workflow) |
+| Infrastructure Abstractions | [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog) |
 | Domain Entities | [Domain Model & API Reference: Domain Entity Catalog](06-domain-model-api-reference.md#domain-entity-catalog) |
 | Component Interactions | [Integration Contracts](07-integration-contracts.md) |
 
