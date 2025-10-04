@@ -103,16 +103,10 @@ JSON structure containing repository config, discovered projects, and phase grou
 Hot worker pool optimized for repository discovery with cached Git repositories. See [Execution & Orchestration: Hot Discovery Pool](03-execution-orchestration.md#hot-discovery-pool).
 
 ### Dispatcher
-Lightweight pod that submits jobs to SQS and polls DynamoDB for completion. Part of Argo Workflows execution. See [Execution & Orchestration: Dispatcher Templates](03-execution-orchestration.md#dispatcher-templates).
-
-### DLQ (Dead Letter Queue)
-SQS queue for failed jobs after maximum retry attempts. Monitored via CloudWatch alarms.
+Lightweight pod that publishes jobs to NATS with reply subjects and awaits direct replies from workers. Part of Argo Workflows execution. See [Execution & Orchestration: Dispatcher Templates](03-execution-orchestration.md#dispatcher-templates).
 
 ### Domain Entity
 A persistent business object in the platform (e.g., PipelineRun, Release, Deployment). See [Domain Model & API Reference: Domain Entity Catalog](06-domain-model-api-reference.md#domain-entity-catalog).
-
-### DynamoDB
-AWS NoSQL database used for real-time job status tracking with automatic TTL cleanup. See [Execution & Orchestration: DynamoDB Job Tracking](03-execution-orchestration.md#dynamodb-job-tracking).
 
 ---
 
@@ -214,13 +208,6 @@ Tagging strategy where tags follow `{project}/v*` pattern for individual project
 
 ---
 
-## N
-
-### Numeric Alias
-Auto-incrementing release identifier per project. Example: Release 42. See [Release & Deployment: Alias System](05-release-deployment.md#alias-system).
-
----
-
 ## O
 
 ### OCI (Open Container Initiative)
@@ -311,10 +298,41 @@ Forward deployment of a previous release to an environment. Implemented as redep
 
 ---
 
+## N
+
+### NATS
+Message-oriented middleware providing queuing and request-reply patterns for ephemeral job coordination. See [Execution & Orchestration: NATS Infrastructure](03-execution-orchestration.md#nats-infrastructure).
+
+### Numeric Alias
+Auto-incrementing release identifier per project. Example: Release 42. See [Release & Deployment: Alias System](05-release-deployment.md#alias-system).
+
+---
+
+## J
+
+### JetStream
+NATS persistence layer providing guaranteed delivery and work-queue semantics for job distribution. See [Execution & Orchestration: NATS Infrastructure](03-execution-orchestration.md#nats-infrastructure).
+
+---
+
+## P
+
+### Pull Consumer
+JetStream consumer where workers explicitly request messages from streams. See [Execution & Orchestration: Job Distribution Pattern](03-execution-orchestration.md#job-distribution-pattern).
+
+---
+
+## R
+
+### Request-Reply
+Pattern where workers respond directly to dispatcher requests via NATS inbox subjects. Eliminates polling and intermediate state storage. See [Execution & Orchestration: Request-Reply Pattern](03-execution-orchestration.md#request-reply-pattern).
+
+---
+
 ## S
 
 ### S3 (Simple Storage Service)
-AWS object storage for discovery outputs, logs, and artifact staging. See [Execution & Orchestration: S3 Storage](03-execution-orchestration.md#s3-storage).
+AWS object storage for logs and large job results (>1MB). See [Execution & Orchestration: S3 Storage](03-execution-orchestration.md#s3-storage).
 
 ### SBOM (Software Bill of Materials)
 List of software components in an artifact. Generated automatically using Syft. See [Build & Distribution: Artifact Tracking OCI Format](04-build-distribution.md#artifact-tracking-oci-format).
@@ -334,8 +352,6 @@ Machine identity for internal service-to-service authentication managed by Keycl
 ### Single Source of Truth
 Principle where every concept has exactly one authoritative definition. See [Core Architecture: Single Source of Truth](01-core-architecture.md#single-source-of-truth).
 
-### SQS (Simple Queue Service)
-AWS message queue for distributing jobs to worker pools. See [Execution & Orchestration: SQS Configuration](03-execution-orchestration.md#sqs-configuration).
 
 ### Staging Directory
 Temporary filesystem location where producers output artifacts before publishing. Cleaned up after release.
@@ -368,8 +384,6 @@ Domain entity tracking execution of all steps for a project within a phase. See 
 ### Tracking Image
 See **Artifact OCI Tracking Image**.
 
-### TTL (Time To Live)
-Automatic expiration for DynamoDB records (7 days). Enables automatic cleanup of job status.
 
 ---
 
@@ -405,7 +419,6 @@ Schema defining a Crossplane Composite Resource type. Platform provides XRDs for
 | CNCF | Cloud Native Computing Foundation | Open source foundation (Crossplane, Argo) |
 | CRD | Custom Resource Definition | Kubernetes extension mechanism |
 | DAG | Directed Acyclic Graph | Execution dependency graph |
-| DLQ | Dead Letter Queue | Failed message queue |
 | IAM | Identity and Access Management | AWS authentication service |
 | IRSA | IAM Roles for Service Accounts | Kubernetes-AWS integration |
 | KRD | Kubernetes Resource Definition | YAML manifest |
@@ -415,9 +428,7 @@ Schema defining a Crossplane Composite Resource type. Platform provides XRDs for
 | S3 | Simple Storage Service | AWS object storage |
 | SBOM | Software Bill of Materials | Component inventory |
 | SCM | Source Control Management | Git/GitHub |
-| SQS | Simple Queue Service | AWS message queue |
 | SSO | Single Sign-On | Unified authentication |
-| TTL | Time To Live | Expiration period |
 | URI | Uniform Resource Identifier | Resource address |
 | XR | Composite Resource | Crossplane abstraction |
 | XRD | Composite Resource Definition | Crossplane schema |

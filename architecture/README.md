@@ -99,8 +99,9 @@ Defines how work gets executed in the platform.
 - Pipeline architecture
 - Argo Workflows integration
 - Worker pool architecture
-- AWS infrastructure (SQS, DynamoDB, S3)
-- Job distribution and status tracking
+- NATS JetStream for job distribution
+- AWS infrastructure (S3) for logs and results
+- Job distribution via request-reply pattern
 
 **Read this when**:
 - Understanding pipeline execution

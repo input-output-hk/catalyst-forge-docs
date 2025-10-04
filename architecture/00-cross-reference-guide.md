@@ -267,9 +267,8 @@ The execution system uses AWS services following the patterns defined in
 [Core Architecture: Shared Infrastructure Patterns](01-core-architecture.md#shared-infrastructure-patterns).
 
 Specifically:
-- **SQS**: For job queue management
-- **DynamoDB**: For status tracking
-- **S3**: For artifact storage
+- **NATS JetStream**: For job distribution and request-reply coordination
+- **S3**: For logs and large result storage
 
 For authentication to AWS services, see [Core Architecture: Authentication & Authorization Model](01-core-architecture.md#authentication--authorization-model).
 ```

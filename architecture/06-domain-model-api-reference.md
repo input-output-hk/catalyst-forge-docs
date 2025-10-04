@@ -438,23 +438,6 @@ Request Body:
 Response (200 OK)
 ```
 
-**Get Jobs for Run** (Proxies to DynamoDB):
-```http
-GET /v1/jobs/{run_id}
-Authorization: Bearer {keycloak-service-account-token}
-
-Response (200 OK):
-{
-  "jobs": [
-    {
-      "job_id": "string",
-      "type": "discovery" | "task" | "artifact",
-      "status": "pending" | "processing" | "completed"
-    }
-  ]
-}
-```
-
 ### Release APIs
 
 **Base Path**: `/v1`

@@ -42,7 +42,6 @@ The Pipeline Component consists of four primary subsystems:
 - State persistence to database
 - Authentication via GitHub OIDC and service accounts
 - Worker coordination endpoints
-- Job status synchronization with DynamoDB
 
 **Argo Workflows Engine**
 - Orchestrates pipeline execution as Kubernetes-native workflows
@@ -55,14 +54,14 @@ The Pipeline Component consists of four primary subsystems:
 - Persistent pods with cached repositories and warm Earthly connections
 - Discovery Handler: Performs repository discovery with cached checkouts
 - CI Handler: Executes Earthly targets with pre-established connections
-- Consumes jobs from SQS queues
-- Reports status to DynamoDB and API
+- Consumes jobs from NATS JetStream pull consumers
+- Reports status via request-reply pattern to dispatcher
 
-**AWS Infrastructure**
-- SQS: Distributes jobs to worker service
-- DynamoDB: Tracks job execution status
-- S3: Stores discovery outputs, logs, and artifacts
-- IAM: Manages service authentication via IRSA
+**NATS Infrastructure**
+- JetStream: Distributes jobs to worker service via work queues
+- Request-reply: Workers respond directly to dispatcher inboxes
+- S3: Stores large results (>1MB), logs, and artifacts
+- IAM: Manages service authentication via IRSA (for AWS resources)
 
 ### Workflow Structure
 
@@ -70,14 +69,14 @@ Each pipeline run creates a single Argo Workflow with lightweight dispatcher tem
 
 ```
 PipelineRun Workflow (root)
-├── Discovery Dispatcher (submits to SQS, polls for result)
+├── Discovery Dispatcher (publishes to NATS with reply subject, awaits reply)
 ├── Phase Loop (sequential execution)
-│   └── Task Dispatchers (parallel submission to SQS)
+│   └── Task Dispatchers (parallel publish to NATS with reply subjects)
 └── Release Dispatchers (conditional, based on discovery)
     └── Artifact Building Dispatchers
 ```
 
-Dispatchers submit jobs to SQS and poll DynamoDB for completion, while actual work happens in the Worker service.
+Dispatchers publish jobs to NATS with reply subjects and await direct replies from workers, while actual work happens in the Worker service.
 
 ### Worker Service Architecture
 
@@ -86,11 +85,11 @@ The Worker service provides unified execution for all platform job types, mainta
 #### Unified Worker Design
 
 The Worker service consolidates all asynchronous execution into a single codebase that:
-- Polls SQS queues for jobs
+- Pulls jobs from NATS JetStream streams
 - Routes to appropriate internal handlers based on job type
 - Maintains a shared Git repository cache
 - Manages Earthly connections for CI operations
-- Reports status to DynamoDB and S3
+- Reports results via request-reply pattern to dispatcher
 
 **Internal Job Handlers**:
 - **Discovery Handler**: Traverses repositories, parses CUE configurations, evaluates release triggers
@@ -99,73 +98,40 @@ The Worker service consolidates all asynchronous execution into a single codebas
 - **Release Handler**: Renders CUE to Kubernetes resources, packages Release OCI images
 - **Deployment Handler**: Updates GitOps repository pointer files
 
-#### Queue Consumption Pattern
+#### Job Distribution Pattern
 
-Each worker StatefulSet is configured to poll from exactly one SQS queue:
+Workers consume jobs using NATS pull consumers:
 
-```yaml
-# Worker environment configuration
-worker-discovery:
-  env:
-    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-discovery"
-    WORKER_TYPE: "discovery"
-
-worker-ci:
-  env:
-    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-tasks"
-    WORKER_TYPE: "ci"
-
-worker-artifact:
-  env:
-    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-artifacts"
-    WORKER_TYPE: "artifact"
-
-worker-release:
-  env:
-    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-releases"
-    WORKER_TYPE: "release"
-```
-
-**Message Processing**:
 ```go
-func (w *Worker) processMessages() {
-    for {
-        // Long poll from designated queue
-        result, err := w.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-            QueueUrl:         &w.queueURL,
-            WaitTimeSeconds:  20,
-            MaxNumberOfMessages: 1,
-        })
+func (w *Worker) processJobs() {
+    // Create durable consumer
+    consumer, _ := js.PullSubscribe(
+        fmt.Sprintf("pipeline.%s.*", w.workerType),
+        fmt.Sprintf("%s-consumer", w.workerType),
+        nats.Durable(fmt.Sprintf("%s-consumer", w.workerType)),
+    )
 
-        if err != nil || len(result.Messages) == 0 {
+    for {
+        // Pull next job
+        msgs, err := consumer.Fetch(1, nats.MaxWait(20*time.Second))
+        if err != nil || len(msgs) == 0 {
             continue
         }
 
-        message := result.Messages[0]
-        job := parseJob(message.Body)
+        msg := msgs[0]
+        job := parseJob(msg.Data)
 
-        // Process based on worker type
-        switch w.workerType {
-        case "discovery":
-            w.handleDiscoveryJob(job)
-        case "ci":
-            w.handleCIJob(job)
-        case "artifact":
-            w.handleArtifactJob(job)  // Build + publish atomic
-        case "release":
-            w.handleReleaseJob(job)  // Includes deployment
-        }
+        // Process job
+        result := w.executeJob(job)
 
-        // Delete message on success
-        w.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-            QueueUrl:      &w.queueURL,
-            ReceiptHandle: message.ReceiptHandle,
-        })
+        // Reply directly to dispatcher
+        msg.Respond(result.ToJSON())
+
+        // Acknowledge after successful reply
+        msg.Ack()
     }
 }
 ```
-
-This ensures workers only process jobs appropriate for their resource allocation and configuration.
 
 #### Deployment Strategy
 
@@ -193,6 +159,15 @@ spec:
     spec:
       containers:
       - name: worker
+        env:
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        - name: CONSUMER_NAME
+          value: "discovery-consumer"
+        - name: STREAM_NAME
+          value: "pipeline-discovery"
+        - name: WORKER_TYPE
+          value: "discovery"
         resources:
           requests: { cpu: 1, memory: 2Gi }
           limits: { cpu: 2, memory: 4Gi }
@@ -221,6 +196,15 @@ spec:
     spec:
       containers:
       - name: worker
+        env:
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        - name: CONSUMER_NAME
+          value: "ci-consumer"
+        - name: STREAM_NAME
+          value: "pipeline-tasks"
+        - name: WORKER_TYPE
+          value: "ci"
         resources:
           requests: { cpu: 4, memory: 8Gi }
           limits: { cpu: 8, memory: 16Gi }
@@ -249,6 +233,15 @@ spec:
     spec:
       containers:
       - name: worker
+        env:
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        - name: CONSUMER_NAME
+          value: "artifact-consumer"
+        - name: STREAM_NAME
+          value: "pipeline-artifacts"
+        - name: WORKER_TYPE
+          value: "artifact"
         resources:
           requests: { cpu: 3, memory: 6Gi }
           limits: { cpu: 6, memory: 12Gi }
@@ -283,6 +276,15 @@ spec:
     spec:
       containers:
       - name: worker
+        env:
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        - name: CONSUMER_NAME
+          value: "release-consumer"
+        - name: STREAM_NAME
+          value: "pipeline-releases"
+        - name: WORKER_TYPE
+          value: "release"
         resources:
           requests: { cpu: 2, memory: 4Gi }
           limits: { cpu: 4, memory: 8Gi }
@@ -338,10 +340,9 @@ git worktree remove /workspace/$JOB_ID
 
 #### Scaling with KEDA
 
-Each worker StatefulSet scales independently based on its queue depth:
+Each worker StatefulSet scales independently based on its NATS JetStream consumer lag:
 
 ```yaml
-# Discovery worker scaler
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -349,114 +350,65 @@ metadata:
 spec:
   scaleTargetRef:
     name: worker-discovery
-  minReplicaCount: 1
-  maxReplicaCount: 5
   triggers:
-  - type: aws-sqs-queue
+  - type: nats-jetstream
     metadata:
-      queueURL: https://sqs.region.amazonaws.com/account/pipeline-discovery
-      queueLength: "5"  # Target 5 messages per worker
-
-# CI worker scaler
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: worker-ci-scaler
-spec:
-  scaleTargetRef:
-    name: worker-ci
-  minReplicaCount: 2
-  maxReplicaCount: 20
-  triggers:
-  - type: aws-sqs-queue
-    metadata:
-      queueURL: https://sqs.region.amazonaws.com/account/pipeline-tasks
-      queueLength: "2"  # Target 2 messages per worker (builds are slow)
-
-# Artifact worker scaler
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: worker-artifact-scaler
-spec:
-  scaleTargetRef:
-    name: worker-artifact
-  minReplicaCount: 1
-  maxReplicaCount: 10
-  triggers:
-  - type: aws-sqs-queue
-    metadata:
-      queueURL: https://sqs.region.amazonaws.com/account/pipeline-artifacts
-      queueLength: "2"  # Target 2 messages per worker (build + publish)
-
-# Release worker scaler
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: worker-release-scaler
-spec:
-  scaleTargetRef:
-    name: worker-release
-  minReplicaCount: 1
-  maxReplicaCount: 10
-  triggers:
-  - type: aws-sqs-queue
-    metadata:
-      queueURL: https://sqs.region.amazonaws.com/account/pipeline-releases
-      queueLength: "3"  # Target 3 messages per worker
+      account: "$G"
+      stream: pipeline-discovery
+      consumer: discovery-consumer
+      lagThreshold: "10"
 ```
 
-Independent scaling ensures each job type gets appropriate resources without over-provisioning.
+(Apply similar pattern for `worker-ci`, `worker-artifact`, and `worker-release` StatefulSets)
 
-#### Queue Processing
+#### NATS Infrastructure
 
-Workers continuously poll SQS for jobs:
+The platform uses NATS JetStream for job distribution and status tracking:
 
-```go
-for {
-    // Long polling (20 seconds)
-    output, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-        QueueUrl:            &queueURL,
-        WaitTimeSeconds:     20,
-        MaxNumberOfMessages: 1,
-    })
+**Stream Configuration**:
+```yaml
+streams:
+  pipeline-discovery:
+    subjects: ["pipeline.discovery.*"]
+    retention: workqueue
+    max_age: 1h
+    max_msgs: 1000
+    storage: file
+    replicas: 3
 
-    if err == nil && len(output.Messages) > 0 {
-        message := output.Messages[0]
-        job := parseJob(message)
-        result := executeJob(job)
+  pipeline-tasks:
+    subjects: ["pipeline.tasks.*"]
+    retention: workqueue
+    max_age: 2h
+    max_msgs: 5000
+    storage: file
+    replicas: 3
 
-        // Write result to S3
-        s3Client.PutObject(ctx, &s3.PutObjectInput{
-            Bucket: &bucket,
-            Key:    &job.ResultPath,
-            Body:   bytes.NewReader(result),
-        })
+  pipeline-artifacts:
+    subjects: ["pipeline.artifacts.*"]
+    retention: workqueue
+    max_age: 1h
+    max_msgs: 1000
+    storage: file
+    replicas: 3
 
-        // Update DynamoDB status
-        dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-            TableName: aws.String("pipeline-jobs"),
-            Key: map[string]types.AttributeValue{
-                "job_id": &types.AttributeValueMemberS{Value: job.ID},
-            },
-            UpdateExpression: aws.String("SET #status = :status, result_location = :location"),
-            ExpressionAttributeNames: map[string]string{
-                "#status": "status",
-            },
-            ExpressionAttributeValues: map[string]types.AttributeValue{
-                ":status":   &types.AttributeValueMemberS{Value: "completed"},
-                ":location": &types.AttributeValueMemberS{Value: s3Path},
-            },
-        })
-
-        // Delete message
-        sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-            QueueUrl:      &queueURL,
-            ReceiptHandle: message.ReceiptHandle,
-        })
-    }
-}
+  pipeline-releases:
+    subjects: ["pipeline.releases.*"]
+    retention: workqueue
+    max_age: 1h
+    max_msgs: 1000
+    storage: file
+    replicas: 3
 ```
+
+**Consumer Configuration**:
+Each worker StatefulSet creates a durable pull consumer:
+- Acknowledgment policy: Explicit
+- Replay policy: Instant
+- Max deliver: 3
+- Ack wait: Matches job type timeout
+
+**Deployment**: 3-node NATS cluster with EBS-backed PVCs for persistence (ephemeral data only, no disaster recovery required)
 
 ### Phase & Step Execution
 
@@ -495,28 +447,40 @@ The Discovery output drives the entire workflow through Argo's dynamic generatio
 
 Argo Workflows run lightweight dispatcher pods that interface between orchestration and execution. The dispatcher is a **single platform-provided Go binary** that routes jobs to appropriate queues based on job type.
 
-**Queue Routing Logic**:
+**Stream Routing Logic**:
 ```go
-func (d *Dispatcher) submitJob(job Job) error {
-    var queueURL string
+func (d *Dispatcher) submitJob(job Job) (*JobResult, error) {
+    var subject string
 
     switch job.Type {
     case JobTypeDiscovery:
-        queueURL = d.discoveryQueueURL  // pipeline-discovery
+        subject = fmt.Sprintf("pipeline.discovery.%s", job.ID)
     case JobTypeCI:
-        queueURL = d.taskQueueURL       // pipeline-tasks
+        subject = fmt.Sprintf("pipeline.tasks.%s", job.ID)
     case JobTypeArtifact:
-        queueURL = d.artifactQueueURL   // pipeline-artifacts
+        subject = fmt.Sprintf("pipeline.artifacts.%s", job.ID)
     case JobTypeRelease, JobTypeDeployment:
-        queueURL = d.releaseQueueURL    // pipeline-releases
+        subject = fmt.Sprintf("pipeline.releases.%s", job.ID)
     default:
-        return fmt.Errorf("unknown job type: %s", job.Type)
+        return nil, fmt.Errorf("unknown job type: %s", job.Type)
     }
 
-    return d.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
-        QueueUrl:    &queueURL,
-        MessageBody: aws.String(job.ToJSON()),
-    })
+    // Create inbox for reply
+    inbox := nats.NewInbox()
+    sub, _ := d.nc.SubscribeSync(inbox)
+    defer sub.Unsubscribe()
+
+    // Publish job with reply subject
+    job.ReplyTo = inbox
+    d.js.Publish(subject, job.ToJSON())
+
+    // Wait for reply with timeout
+    msg, err := sub.NextMsg(job.Timeout)
+    if err == nats.ErrTimeout {
+        return nil, fmt.Errorf("job timeout after %v", job.Timeout)
+    }
+
+    return parseJobResult(msg.Data), nil
 }
 ```
 
@@ -526,14 +490,8 @@ func (d *Dispatcher) submitJob(job Job) error {
   container:
     image: forge.io/platform/dispatcher:v1.0.0
     env:
-    - name: DISCOVERY_QUEUE_URL
-      value: "https://sqs.region.amazonaws.com/account/pipeline-discovery"
-    - name: TASK_QUEUE_URL
-      value: "https://sqs.region.amazonaws.com/account/pipeline-tasks"
-    - name: ARTIFACT_QUEUE_URL
-      value: "https://sqs.region.amazonaws.com/account/pipeline-artifacts"
-    - name: RELEASE_QUEUE_URL
-      value: "https://sqs.region.amazonaws.com/account/pipeline-releases"
+    - name: NATS_URL
+      value: "nats://nats:4222"
     - name: JOB_TYPE
       value: "discovery"  # Set by Argo based on workflow stage
 ```
@@ -583,111 +541,43 @@ func (d *Dispatcher) executeReleasePhase(project Project) error {
 
 This ensures artifacts build in parallel while maintaining data flow to the release step.
 
-### AWS Infrastructure
+### Request-Reply Pattern
 
-For AWS authentication patterns, see [Core Architecture: Authentication & Authorization Model](01-core-architecture.md#authentication--authorization-model).
-
-#### SQS Configuration
-
-The platform uses four separate SQS queues for different job types:
-
-```yaml
-queues:
-  # Discovery operations - project discovery and configuration parsing
-  pipeline-discovery:
-    name: pipeline-discovery
-    visibilityTimeout: 300  # 5 minutes
-    messageRetention: 3600  # 1 hour
-    consumers: worker-discovery StatefulSet
-
-  # CI operations - test and build phase execution
-  pipeline-tasks:
-    name: pipeline-tasks
-    visibilityTimeout: 1800  # 30 minutes (builds can be slow)
-    messageRetention: 7200  # 2 hours
-    consumers: worker-ci StatefulSet
-
-  # Artifact operations - build and publish artifacts atomically
-  pipeline-artifacts:
-    name: pipeline-artifacts
-    visibilityTimeout: 1200  # 20 minutes (build + multi-publisher)
-    messageRetention: 3600  # 1 hour
-    consumers: worker-artifact StatefulSet
-
-  # Release operations - release packaging and deployment
-  pipeline-releases:
-    name: pipeline-releases
-    visibilityTimeout: 900   # 15 minutes
-    messageRetention: 3600  # 1 hour
-    consumers: worker-release StatefulSet
-```
-
-**Queue Selection Logic**:
-- `discovery` jobs → `pipeline-discovery`
-- `ci` jobs (test, build phases) → `pipeline-tasks`
-- `artifact` jobs (build + publish atomic) → `pipeline-artifacts`
-- `release` and `deployment` jobs → `pipeline-releases`
-
-**Parallelization**: The artifact queue enables parallel building of multiple artifacts during the release phase, with each worker handling one complete artifact lifecycle (build + publish).
-
-### Result Handling Patterns
-
-The platform uses two distinct patterns for job result handling:
-
-#### Data-Returning Jobs
-
-Jobs that produce data needed by subsequent workflow steps:
-
-**Discovery Jobs**:
-- Output: Project list, phase groups, release triggers
-- Storage: S3 at `pipeline-runs/{run_id}/discovery/output.json`
-- Usage: Argo Workflows uses for dynamic workflow generation
-
-**Artifact Jobs**:
-- Output: Artifact URIs, tracking image references, metadata
-- Storage: S3 at `pipeline-runs/{run_id}/artifacts/{project}/{artifact}/result.json`
-- Usage: Release job uses to create Release entity
+All jobs use a unified request-reply pattern:
 
 **Flow**:
+1. Dispatcher publishes job with reply subject
+2. Worker processes job
+3. Worker replies with result/status
+4. Dispatcher receives reply or times out
+
+**Result Handling**:
+- **Small results (<1MB)**: Included directly in reply message
+- **Large results (>1MB)**: Stored in S3, reply contains S3 reference
+
+**Timeout Handling**:
+```go
+func (d *Dispatcher) submitJob(job Job) (*JobResult, error) {
+    // Create inbox for reply
+    inbox := nats.NewInbox()
+    sub, _ := d.nc.SubscribeSync(inbox)
+    defer sub.Unsubscribe()
+
+    // Publish job with reply subject
+    job.ReplyTo = inbox
+    d.js.Publish(fmt.Sprintf("pipeline.%s.%s", job.Type, job.ID), job.ToJSON())
+
+    // Wait for reply with timeout
+    msg, err := sub.NextMsg(job.Timeout)
+    if err == nats.ErrTimeout {
+        return nil, fmt.Errorf("job timeout after %v", job.Timeout)
+    }
+
+    return parseJobResult(msg.Data), nil
+}
 ```
-Worker → S3 (result.json) → DynamoDB (status + S3 location)
-Dispatcher polls DynamoDB → Fetches from S3 → Returns data to Argo
-```
 
-#### Status-Only Jobs
-
-Jobs that perform operations and update domain entities:
-
-**CI Tasks** (test, build phases):
-- Updates: StepExecution entities via Platform API
-- Returns: Success/failure status only
-
-**Release Jobs**:
-- Updates: Release entity via Platform API
-- Returns: Success/failure status only
-
-**Deployment Jobs**:
-- Updates: Deployment entity via Platform API
-- Returns: Success/failure status only
-
-**Flow**:
-```
-Worker → Platform API (entity updates) → DynamoDB (status only)
-Dispatcher polls DynamoDB → Returns status to Argo
-```
-
-#### DynamoDB Schema
-
-```
-Table: pipeline-jobs
-Fields:
-- job_id: string (PK)
-- status: enum (pending, running, completed, failed)
-- error_message: string (optional - for failures)
-- result_location: string (optional - S3 URI for data-returning jobs)
-- updated_at: timestamp
-- ttl: timestamp (auto-cleanup after 7 days)
-```
+This eliminates complex polling logic and intermediate state storage.
 
 #### S3 Storage
 
@@ -696,11 +586,6 @@ Fields:
 forge-platform-bucket/
 └── pipeline-runs/
     └── {run_id}/
-        ├── discovery/
-        │   └── output.json          # Discovery results
-        ├── artifacts/
-        │   └── {project}/{artifact}/
-        │       └── result.json       # Artifact metadata
         └── logs/
             └── {phase}/{project}/{step}.log  # Execution logs
 ```
@@ -711,16 +596,6 @@ AWS S3 Lifecycle Policies handle automatic cleanup:
 
 ```yaml
 lifecycle_rules:
-  - id: discovery-cleanup
-    prefix: pipeline-runs/*/discovery/
-    expiration:
-      days: 7
-
-  - id: artifact-results-cleanup
-    prefix: pipeline-runs/*/artifacts/
-    expiration:
-      days: 7
-
   - id: logs-cleanup
     prefix: pipeline-runs/*/logs/
     expiration:
@@ -730,7 +605,6 @@ lifecycle_rules:
 **Access Patterns**:
 - Workers write directly using IRSA credentials
 - Platform API generates presigned URLs for user access
-- Dispatchers read results using IRSA credentials
 
 No custom cleanup service required - AWS manages lifecycle automatically.
 
@@ -749,24 +623,24 @@ No custom cleanup service required - AWS manages lifecycle automatically.
 
 2. **Discovery**
    - Workflow executes discovery dispatcher
-   - Dispatcher submits job to SQS
-   - Worker service (discovery handler) picks up job
+   - Dispatcher publishes job to NATS with reply subject
+   - Worker service (discovery handler) pulls job from stream
    - Worker uses cached repo to perform discovery
-   - Worker writes result to S3, updates DynamoDB
-   - Dispatcher polls, retrieves result, sets as output parameter
+   - Worker replies directly to dispatcher with results
+   - Dispatcher receives reply, sets as output parameter
    - API updates GitHub status: "Discovering projects..."
 
 3. **Phase Execution**
    - Workflow iterates through phase groups sequentially
    - API updates GitHub status: "Running phase X of Y"
    - For each phase, spawns parallel task dispatchers
-   - Dispatchers submit all project steps to SQS
+   - Dispatchers publish all project steps to NATS with reply subjects
    - Worker service (CI handler) executes Earthly targets
-   - Workers report status to API and DynamoDB
+   - Workers report status to API and reply to dispatchers
    - Logs stream directly to S3
 
 4. **Phase Progression**
-   - Dispatchers wait for all tasks to complete
+   - Dispatchers wait for all task replies to complete
    - API updates GitHub status with phase completion
    - Workflow proceeds to next phase group
    - Process repeats until all phases complete
@@ -780,11 +654,10 @@ No custom cleanup service required - AWS manages lifecycle automatically.
 
 6. **Completion**
    - Workflow reaches terminal state
-   - API reconciles final status from Argo and DynamoDB
+   - API reconciles final status from Argo
    - API updates GitHub commit status (success/failure/error)
    - If PR workflow, API posts summary comment
    - Database retains complete history
-   - DynamoDB entries expire after TTL
 
 ### Worker Execution Patterns
 
@@ -968,19 +841,19 @@ Grafana Cloud maintains a CloudWatch integration that polls AWS metrics periodic
 
 #### Failure Modes
 
-**SQS Message Failures:**
-- Automatic retries with exponential backoff
-- DLQ for persistent failures
-- CloudWatch alarms for DLQ depth
+**NATS Message Failures:**
+- Automatic redelivery on worker failure (JetStream guarantee)
+- Maximum delivery attempts configurable per stream
+- Idempotent job handlers prevent duplicate execution
 
 **Worker Service Failures:**
 - Kubernetes automatically restarts failed workers
-- Jobs returned to queue after visibility timeout
+- Jobs redelivered to consumer after ack wait timeout
 - Circuit breakers for Earthly connections
 
 **Dispatcher Failures:**
 - Argo retries failed dispatchers
-- Idempotent job submission prevents duplicates
+- Timeout and retry on lost replies (dispatcher logic)
 - Timeout enforcement at workflow level
 
 ## Integration Points
@@ -1135,12 +1008,17 @@ For authentication patterns, see [Core Architecture: Authentication & Authorizat
 
 ### AWS Services Integration
 
-- **SQS**: Job distribution with long polling and DLQ
-- **DynamoDB**: Real-time job status tracking
-- **S3**: Discovery outputs, logs, and artifact storage
+- **S3**: Logs and large result storage
 - **IAM/IRSA**: Service authentication and authorization
 - **CloudWatch**: Metrics and log aggregation
 - **Secrets Manager**: CI secret retrieval (see [Core Architecture: Secret Management Patterns](01-core-architecture.md#secret-management-patterns))
+
+### NATS Integration
+
+- **JetStream**: Job distribution with work-queue retention
+- **Request-Reply**: Direct status/result communication
+- **Pull Consumers**: Worker-driven job consumption
+- **TLS**: Per-service credentials for authentication
 
 ### Earthly Remote Runners
 
@@ -1167,7 +1045,6 @@ For cross-component integration patterns, see [Integration Contracts](07-integra
 **Execution Updates** (Internal):
 - `PUT /v1/tasks/{id}/status` - Update task status
 - `PUT /v1/steps/{id}/status` - Update step status
-- `GET /v1/jobs/{run_id}` - Get job status (proxies to DynamoDB)
 
 ### Domain Model
 

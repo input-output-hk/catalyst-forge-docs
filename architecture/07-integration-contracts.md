@@ -44,21 +44,20 @@ The platform's three-service architecture creates clear communication boundaries
 #### Orchestration Flow
 - Platform API → Argo Workflows (submit workflow)
 - Argo Workflows → Dispatcher pods (creates ephemeral pods)
-- Dispatcher → SQS (routes to appropriate queue):
-  - Discovery jobs → pipeline-discovery
-  - CI jobs → pipeline-tasks
-  - Artifact jobs → pipeline-artifacts
-  - Release/Deployment jobs → pipeline-releases
-- Worker → SQS (poll from designated queue)
-- Worker → S3 (write results/logs)
-- Worker → DynamoDB (update job status)
+- Dispatcher → NATS (publishes jobs with reply subjects):
+  - Discovery jobs → pipeline.discovery.*
+  - CI jobs → pipeline.tasks.*
+  - Artifact jobs → pipeline.artifacts.*
+  - Release/Deployment jobs → pipeline.releases.*
+- Worker → NATS (pull from durable consumer)
+- Worker → S3 (write logs and large results)
 - Worker → Platform API (update domain entities)
-- Dispatcher → DynamoDB (poll job status)
-- Dispatcher → S3 (fetch results for data-returning jobs)
+- Worker → NATS (reply to dispatcher inbox)
+- Dispatcher → Receives reply or times out
 
 #### Service Scaling
 - Platform API: Horizontal pod autoscaling on CPU/memory
-- Worker: KEDA-based scaling on SQS queue depth
+- Worker: KEDA-based scaling on NATS JetStream consumer lag
 - Dispatcher: Ephemeral, scales with workflow parallelism
 
 Note: All "component interactions" described elsewhere in this document represent logical data flows that are physically realized through these three services.
@@ -104,7 +103,7 @@ For complete authentication specifications, see [Core Architecture: Authenticati
 
 **Asynchronous Interactions**:
 - Pipeline execution (fire-and-forget with status updates)
-- Worker service job processing via SQS
+- Worker service job processing via NATS JetStream
 - GitOps deployments triggered by pointer file updates
 - GitHub status updates (non-blocking)
 
@@ -123,8 +122,7 @@ Project Component (CUE definitions)
 GitHub Actions
     → Platform API (create run)
     → Argo Workflows (orchestration)
-    → Worker Service (execution via SQS)
-    → AWS Services (S3, DynamoDB status tracking)
+    → Worker Service (execution via NATS request-reply)
     → Platform API (status updates)
     → GitHub (commit status)
 ```
@@ -409,110 +407,56 @@ Output (Crossplane generates):
 
 ### Shared Infrastructure Usage
 
-#### AWS Services
+#### NATS JetStream
 
-##### SQS (Simple Queue Service)
-
-**Purpose**: Job distribution to specialized worker pools with queue-based routing
-
-**Queue Architecture**:
-- **pipeline-discovery**: Discovery job queue → worker-discovery StatefulSet
-- **pipeline-tasks**: CI job queue → worker-ci StatefulSet
-- **pipeline-artifacts**: Artifact job queue → worker-artifact StatefulSet
-- **pipeline-releases**: Release/deployment queue → worker-release StatefulSet
+**Purpose**: Job distribution and request-reply coordination
 
 **Consumers**:
-- Dispatcher (sends messages based on job type)
-- Worker StatefulSets (each polls only its designated queue)
+- Dispatcher pods (publish jobs, await replies)
+- Worker StatefulSets (consume jobs, send replies)
 
-**Queue Configuration**:
+**Architecture**:
 ```yaml
-pipeline-discovery:
-  visibilityTimeout: 300  # 5 minutes
-  messageRetention: 3600  # 1 hour
+streams:
+  pipeline-discovery: Discovery job queue → worker-discovery
+  pipeline-tasks: CI job queue → worker-ci
+  pipeline-artifacts: Artifact job queue → worker-artifact
+  pipeline-releases: Release/deployment queue → worker-release
 
-pipeline-tasks:
-  visibilityTimeout: 1800  # 30 minutes (long builds)
-  messageRetention: 7200  # 2 hours
-
-pipeline-artifacts:
-  visibilityTimeout: 1200  # 20 minutes (build + multi-publisher)
-  messageRetention: 3600  # 1 hour
-
-pipeline-releases:
-  visibilityTimeout: 900   # 15 minutes
-  messageRetention: 3600  # 1 hour
+deployment:
+  replicas: 3
+  storage: EBS PVCs (10Gi per node)
+  cluster_name: catalyst-forge
 ```
 
-**Message Routing**:
-- Dispatcher determines target queue from job type
-- No message filtering - each queue contains only appropriate job types
-- Workers consume from single queue - no message inspection/returning
+**Message Flow**:
+- Dispatcher determines stream from job type
+- Publishes with unique reply subject (inbox)
+- Worker pulls from durable consumer
+- Worker replies to inbox
+- Dispatcher receives reply or times out
 
-**Dead Letter Queues**: Each queue has corresponding DLQ for failed messages
+**Failure Handling**:
+- Message redelivery on worker failure (JetStream guarantee)
+- Timeout and retry on lost replies (dispatcher logic)
+- Idempotent job handlers (application guarantee)
 
-**Authentication**: Workers and Dispatcher use IRSA to access queues
+**Authentication**: TLS with per-service credentials
 
-**Scaling**: KEDA monitors each queue independently for autoscaling
+**Reference**: [Execution & Orchestration: NATS Infrastructure](03-execution-orchestration.md#nats-infrastructure)
 
-**Reference**: [Execution & Orchestration: SQS Configuration](03-execution-orchestration.md#sqs-configuration)
-
-##### DynamoDB
-
-**Purpose**: Real-time job status tracking with automatic cleanup
-
-**Consumers**:
-- Platform API (creates table, queries job status)
-- Worker Service (update job status)
-- Dispatcher Pods (poll for job completion)
-
-**Schema**:
-```
-Table: pipeline-jobs
-Primary Key: job_id (String)
-
-Attributes:
-- job_id: string
-- run_id: string
-- type: enum (discovery, task, artifact)
-- status: enum (pending, running, completed, failed)
-- result_location: string (S3 URI)
-- created_at: timestamp
-- updated_at: timestamp
-- ttl: timestamp (auto-cleanup after 7 days)
-```
-
-**Access Patterns**:
-- Workers: Write status updates
-- Dispatchers: Poll by job_id for completion
-- API: Query by run_id for aggregated status
-
-**Consistency Model**: Eventual consistency acceptable (status updates tolerate slight delay)
-
-**Authentication**: IRSA for all access
-
-**Reference**: [Execution & Orchestration: DynamoDB Job Tracking](03-execution-orchestration.md#dynamodb-job-tracking)
+#### AWS Services
 
 ##### S3 (Simple Storage Service)
 
-**Purpose**: Storage for discovery outputs, logs, and build artifacts
+**Purpose**: Storage for logs and large job results
 
 **Consumers**:
-- Platform API (stores discovery results, logs)
-- Worker Service (write outputs, stream logs)
-- Worker Service (stages artifacts before publishing)
+- Worker Service (write logs and large results >1MB)
 - All services (read logs via presigned URLs)
 
 **Bucket Structure**:
 ```
-pipeline-results/
-  {run_id}/
-    discovery.json
-    phases/
-      {phase}/
-        {project}/
-          {step}.json
-
 pipeline-logs/
   {run_id}/
     {phase}/
@@ -527,7 +471,6 @@ artifact-staging/
 ```
 
 **Lifecycle Policies**:
-- Results: 7 days
 - Logs: 90 days
 - Staging: 1 day (cleanup after release)
 

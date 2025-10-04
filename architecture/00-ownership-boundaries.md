@@ -68,7 +68,8 @@ This document defines clear ownership boundaries for each architectural document
 - Pipeline architecture and design
 - Argo Workflows integration details
 - Worker pool architecture and scaling
-- AWS infrastructure usage (SQS, DynamoDB, S3) for execution
+- NATS JetStream infrastructure for job distribution
+- AWS infrastructure usage (S3) for logs and large results
 - Phase and step execution logic
 - DAG construction and optimization
 - Job distribution and status tracking

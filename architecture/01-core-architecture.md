@@ -100,10 +100,10 @@ For infrastructure abstraction specifications, see [Infrastructure Abstractions]
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                         External Dependencies                            │
-│  ┌──────────┐  ┌────────────┐  ┌─────────┐  ┌──────────────────────┐     │
-│  │  GitHub  │  │ PostgreSQL │  │ Argo CD │  │   AWS Services       │     │
-│  │          │  │            │  │         │  │ (SQS/DynamoDB/S3/SM) │     │
-│  └──────────┘  └────────────┘  └─────────┘  └──────────────────────┘     │
+│  ┌──────────┐  ┌────────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐  │
+│  │  GitHub  │  │ PostgreSQL │  │ Argo CD │  │   NATS   │  │   AWS    │  │
+│  │          │  │            │  │         │  │          │  │  (S3/SM) │  │
+│  └──────────┘  └────────────┘  └─────────┘  └──────────┘  └──────────┘  │
 └──────────────────────────────────────────────────────────────────────────┘
                                     ▲
                                     │
@@ -173,7 +173,7 @@ While the platform is organized into logical components (Pipeline, Project, Arti
 - Deployed as: Kubernetes Deployment with horizontal scaling
 
 **Worker Service**
-- Executes all asynchronous job types via SQS queue processing
+- Executes all asynchronous job types via NATS JetStream pull consumers
 - Internal modules handle different job types:
   - Discovery: Repository traversal and project discovery
   - CI Execution: Earthly target execution for test/build phases
@@ -186,13 +186,13 @@ While the platform is organized into logical components (Pipeline, Project, Arti
   - `worker-ci`: 10 replicas, 200Gi cache per pod
   - `worker-artifact`: 5 replicas, 150Gi cache per pod
   - `worker-release`: 3 replicas, 100Gi cache per pod
-- Scaling: KEDA-based autoscaling on SQS queue depth (adjusts replica count)
+- Scaling: KEDA-based autoscaling on NATS JetStream consumer lag (adjusts replica count)
 - Storage: Persistent volumes via StatefulSet volumeClaimTemplates
 
 **Dispatcher**
 - Lightweight Go binary packaged as container image
-- Submits jobs to SQS queues based on job type
-- Polls DynamoDB for job completion status
+- Submits jobs to NATS JetStream streams with reply subjects
+- Awaits direct replies from workers via request-reply pattern
 - Returns results to Argo Workflows
 - Deployed as: Ephemeral pods created by Argo Workflows
 - Configuration: Job type specified via environment variables/flags
@@ -200,7 +200,11 @@ While the platform is organized into logical components (Pipeline, Project, Arti
 #### Service Communication Topology
 
 ```
-GitHub → API Server → Argo Workflows → Dispatcher → SQS → Worker → S3/DynamoDB
+GitHub → API Server → Argo Workflows → Dispatcher → NATS (publish with reply subject)
+                                                      ↓
+Worker ← NATS (pull from consumer) ← ← ← ← ← ← ← ← ← ↓
+   ↓
+   └→ NATS (reply to inbox) → Dispatcher
 ```
 
 #### Supporting Infrastructure
@@ -264,7 +268,9 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 
 6. **Argo Workflows for orchestration** - Kubernetes-native workflow orchestration with built-in UI and retry logic
 
-7. **PostgreSQL for persistence** - Reliable, well-understood relational database for audit trails and state management
+7. **NATS JetStream for messaging** - Cluster-local, replicated messaging providing work queues and request-reply patterns for ephemeral job coordination
+
+8. **PostgreSQL for persistence** - Reliable, well-understood relational database for audit trails and permanent state management (ephemeral job state handled by messaging layer)
 
 #### Architectural Patterns
 
@@ -281,6 +287,10 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 13. **Unified Worker service** - Single codebase handling all async jobs with individual persistent caches and Earthly connections
 
 14. **Dual persistence model** - Argo Workflows for volatile execution state, database for permanent audit trail
+
+### Ephemeral Messaging Layer
+
+The messaging plane is intentionally ephemeral. All durable state lives in PostgreSQL (audit trail) and S3 (artifacts/logs). The messaging layer (NATS) only handles in-flight work, with automatic retry on failure. This separation ensures system recovery is simple: lost messages result in timeouts and retries, not data loss.
 
 ## Shared Concepts
 
@@ -821,9 +831,9 @@ Roles:
 #### Security Boundaries
 
 **Per-Run Job Isolation**:
-- Each pipeline run has isolated SQS jobs
-- DynamoDB tracks status per job with TTL
-- S3 results namespaced by run ID
+- Each pipeline run has unique NATS job subjects
+- Job results returned via request-reply pattern
+- S3 results namespaced by run ID for large data
 - No cross-run data access
 
 **Worker Service Security**:
