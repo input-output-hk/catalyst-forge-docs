@@ -237,16 +237,43 @@ For complete OCI tracking image format specifications, see [Core Architecture: O
 
 ### Producer/Publisher Interaction Model
 
-The artifact lifecycle follows a clear progression from configuration to publication:
+The artifact lifecycle is orchestrated by Argo Workflows and executed within the Worker service:
 
-1. **Configuration Loading** - Platform reads artifact definitions from project configuration
-2. **Staging Preparation** - Creates isolated staging directories for each project
-3. **Artifact Production** - Invokes producers for each declared artifact
-4. **Post-Processing** - Generates SBOMs and additional metadata
-5. **Publishing** - Executes publishers in sequence, checking for existing artifacts
-6. **Tracking Creation** - Builds and signs OCI tracking image with complete provenance
-7. **Database Recording** - Persists artifact records with tracking references
-8. **Cleanup** - Removes staging directories
+1. **Configuration Loading** - Worker's release handler reads artifact definitions
+2. **Staging Preparation** - Worker creates isolated staging directories
+3. **Artifact Production** - Worker's artifact handler invokes producers
+4. **Post-Processing** - Worker generates SBOMs and metadata
+5. **Publishing** - Worker executes publishers in sequence
+6. **Tracking Creation** - Worker builds and signs OCI tracking image
+7. **Database Recording** - Worker calls Platform API to persist records
+8. **Cleanup** - Worker removes staging directories
+
+Note: While the Artifacts Component defines the contracts and logic, execution occurs within the Worker service during the release phase of pipeline execution.
+
+#### Atomic Build and Publish
+
+Artifact creation and publishing are **atomic operations** executed by a single worker:
+
+1. Worker receives artifact job from `pipeline-artifacts` queue
+2. Builds artifact using configured producer (e.g., Earthly)
+3. Keeps Docker images in local daemon (not serialized)
+4. Publishes to all configured publishers sequentially
+5. Creates tracking OCI image
+6. Writes result metadata to S3 for release consumption
+7. Updates Platform API with ReleaseArtifact entity
+
+This atomicity is critical for Docker images, which must remain in the same daemon from build through publication. The artifact queue enables multiple artifacts to build in parallel across different workers while maintaining this atomicity requirement.
+
+**Result Data**:
+```json
+{
+  "artifact_name": "api-server",
+  "tracking_oci_uri": "tracking.io/repo/project/api-server:sha-abc123",
+  "published_locations": [
+    {"publisher": "ecr", "uri": "...", "metadata": {...}}
+  ]
+}
+```
 
 #### Idempotency Enforcement
 

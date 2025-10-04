@@ -54,7 +54,7 @@ Releases contain no environment-specific configuration. They package universal K
 The platform consists of four primary components that work together to provide complete SDLC management:
 
 #### Pipeline Component
-Discovers projects, constructs dynamic CI pipelines, and orchestrates build execution. Consists of an API server for state management, Argo Workflows for orchestration, and hot worker pools for actual execution.
+Discovers projects, constructs dynamic CI pipelines, and orchestrates build execution. Consists of an API server for state management, Argo Workflows for orchestration, and the Worker service for actual execution.
 
 **Key Responsibilities**:
 - Repository and project discovery
@@ -113,7 +113,7 @@ For infrastructure abstraction specifications, see [Infrastructure Abstractions]
 │  ┌──────────────────────────────────────────────────────────────┐        │
 │  │           Pipeline Component (Orchestrator)                  │        │
 │  │  ┌──────────────┐  ┌────────────────┐  ┌─────────────────┐   │        │
-│  │  │  API Server  │  │ Argo Workflows │  │ Hot Worker Pools│   │        │
+│  │  │  API Server  │  │ Argo Workflows │  │ Worker Service  │   │        │
 │  │  └──────────────┘  └────────────────┘  └─────────────────┘   │        │
 │  │                                                              │        │
 │  │  • Repository discovery     • Phase orchestration            │        │
@@ -158,6 +158,63 @@ For infrastructure abstraction specifications, see [Infrastructure Abstractions]
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Service Architecture & Deployment Topology
+
+While the platform is organized into logical components (Pipeline, Project, Artifacts, Release & Deployment), these components are realized through three core runtime services:
+
+#### Core Platform Services
+
+**Platform API Server**
+- Single unified REST API service for all platform operations
+- Manages all domain entities (PipelineRun, Release, Deployment, etc.)
+- Handles authentication via Keycloak
+- Processes webhook ingestion from GitHub Actions
+- Updates GitHub commit statuses asynchronously
+- Deployed as: Kubernetes Deployment with horizontal scaling
+
+**Worker Service**
+- Executes all asynchronous job types via SQS queue processing
+- Internal modules handle different job types:
+  - Discovery: Repository traversal and project discovery
+  - CI Execution: Earthly target execution for test/build phases
+  - Artifact Handler: Producer/publisher orchestration, SBOM generation
+  - Release Handler: Resource rendering, OCI packaging
+  - Deployment Handler: GitOps repository updates
+- Each worker maintains individual Git repository cache in persistent storage
+- Deployed as: Multiple Kubernetes **StatefulSets** with different resource profiles
+  - `worker-discovery`: 3 replicas, 50Gi cache per pod
+  - `worker-ci`: 10 replicas, 200Gi cache per pod
+  - `worker-artifact`: 5 replicas, 150Gi cache per pod
+  - `worker-release`: 3 replicas, 100Gi cache per pod
+- Scaling: KEDA-based autoscaling on SQS queue depth (adjusts replica count)
+- Storage: Persistent volumes via StatefulSet volumeClaimTemplates
+
+**Dispatcher**
+- Lightweight Go binary packaged as container image
+- Submits jobs to SQS queues based on job type
+- Polls DynamoDB for job completion status
+- Returns results to Argo Workflows
+- Deployed as: Ephemeral pods created by Argo Workflows
+- Configuration: Job type specified via environment variables/flags
+
+#### Service Communication Topology
+
+```
+GitHub → API Server → Argo Workflows → Dispatcher → SQS → Worker → S3/DynamoDB
+```
+
+#### Supporting Infrastructure
+
+**Database Migrations**
+- Run as Kubernetes Jobs before service deployments
+- Apply schema changes to PostgreSQL
+
+**Argo CD Custom Management Plugin**
+- Runs within Argo CD pods (not a separate service)
+- Extracts resources from Release OCI images
+
+This service architecture prioritizes operational simplicity while maintaining clear boundaries for scaling and failure isolation. The unified Worker service can be split in the future if different job types require independent scaling characteristics.
+
 ### Unified Data Flow
 
 The platform processes work through the following high-level flow from commit to deployment:
@@ -182,9 +239,9 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 ```
 
 1. **Trigger**: GitHub Actions workflow submits pipeline run via CLI
-2. **Discovery**: Pipeline component discovers projects and builds execution DAG
-3. **Phase Execution**: Hot worker pools execute phases based on project configuration
-4. **Release Creation** (conditional): When triggered by event configuration, creates artifacts and packages Kubernetes resource definitions as OCI image
+2. **Discovery**: Worker service (discovery handler) discovers projects and builds execution DAG
+3. **Phase Execution**: Worker service (CI handler) executes phases based on project configuration
+4. **Release Creation** (conditional): When triggered by event configuration, Worker service creates artifacts and packages Kubernetes resource definitions as OCI image
 5. **GitOps Update**: Platform updates pointer files in Git repository
 6. **Resource Extraction**: Argo CD Custom Management Plugin extracts Kubernetes resources from Release OCI image
 7. **Reconciliation**: Resources are applied to cluster - Crossplane handles XRs while Kubernetes handles standard resources
@@ -221,7 +278,7 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 
 12. **Environment-agnostic releases** - Same release (containing KRDs) deploys to any environment via two-tier EnvironmentConfig system for XRs. See [Infrastructure Abstractions: Environment Configuration Model](08-infrastructure-abstractions.md#environment-configuration-model).
 
-13. **Hot worker pools** - Persistent pods with cached repositories and warm connections to eliminate cold start penalties
+13. **Unified Worker service** - Single codebase handling all async jobs with individual persistent caches and Earthly connections
 
 14. **Dual persistence model** - Argo Workflows for volatile execution state, database for permanent audit trail
 
@@ -722,7 +779,7 @@ The platform implements layered authentication with clear boundaries for differe
 - **Scope**: Read operations, manual deployments, approvals
 - **Permissions**: Role-based access control (RBAC) managed in Keycloak
 
-**Worker Pools (Internal)**:
+**Worker Service (Internal)**:
 - **Method**: IAM Roles via IRSA (IAM Roles for Service Accounts)
 - **Validation**: Kubernetes service account tokens
 - **Scope**: AWS service access (S3, DynamoDB, SQS, Secrets Manager)
@@ -769,7 +826,7 @@ Roles:
 - S3 results namespaced by run ID
 - No cross-run data access
 
-**Worker Pool Security**:
+**Worker Service Security**:
 - Workers use IRSA for AWS service access (no long-lived credentials)
 - Dispatcher pods have minimal permissions
 - Network policies restrict inter-pod communication
@@ -871,7 +928,7 @@ Examples are provided in component-specific documents. See:
 - **Concurrent Pipelines**: Recommended maximum 1000
 - **Pipeline Duration**: Hard limit 24 hours
 - **Discovery Output Size**: Maximum 1MB
-- **Worker Pools**: Maximum 50 parallel workers per pool
+- **Worker Service**: Maximum 50 parallel workers per deployment
 
 ### Technical Constraints
 
@@ -885,7 +942,7 @@ Examples are provided in component-specific documents. See:
 ### Planned Improvements
 
 **Multi-Region Support**:
-- Worker pools in multiple regions for disaster recovery
+- Worker service deployments in multiple regions for disaster recovery
 - Region-aware artifact publishing
 - Cross-region release replication
 
@@ -897,7 +954,7 @@ Examples are provided in component-specific documents. See:
 **Extended Build Support**:
 - Alternative execution engines beyond Earthly
 - GPU-enabled workers for ML workloads
-- Custom worker pool configurations per project
+- Custom worker resource configurations per project
 
 **Deployment Enhancements**:
 - Multi-project release groups
@@ -905,8 +962,7 @@ Examples are provided in component-specific documents. See:
 - Dynamic environment creation for feature branches
 
 **Performance Optimizations**:
-- Distributed cache using Redis/Elasticache
-- P2P cache sharing between workers
+- Distributed cache using Redis/Elasticache for build artifacts
 - Cost optimization through spot instances
 
 ---

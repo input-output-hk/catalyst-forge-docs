@@ -27,6 +27,42 @@ All API contracts include version identifiers to enable evolution without breaki
 
 ## Component Communication Patterns
 
+### Service Communication Topology
+
+The platform's three-service architecture creates clear communication boundaries:
+
+#### External → Platform API
+- GitHub Actions → Platform API (REST over HTTPS)
+- CLI Users → Platform API (REST over HTTPS)
+- GitHub Webhooks → Platform API (HTTPS webhooks)
+
+#### Platform API → Infrastructure
+- Platform API → PostgreSQL (SQL via connection pool)
+- Platform API → Argo Server (REST API)
+- Platform API → GitHub API (REST for status updates)
+
+#### Orchestration Flow
+- Platform API → Argo Workflows (submit workflow)
+- Argo Workflows → Dispatcher pods (creates ephemeral pods)
+- Dispatcher → SQS (routes to appropriate queue):
+  - Discovery jobs → pipeline-discovery
+  - CI jobs → pipeline-tasks
+  - Artifact jobs → pipeline-artifacts
+  - Release/Deployment jobs → pipeline-releases
+- Worker → SQS (poll from designated queue)
+- Worker → S3 (write results/logs)
+- Worker → DynamoDB (update job status)
+- Worker → Platform API (update domain entities)
+- Dispatcher → DynamoDB (poll job status)
+- Dispatcher → S3 (fetch results for data-returning jobs)
+
+#### Service Scaling
+- Platform API: Horizontal pod autoscaling on CPU/memory
+- Worker: KEDA-based scaling on SQS queue depth
+- Dispatcher: Ephemeral, scales with workflow parallelism
+
+Note: All "component interactions" described elsewhere in this document represent logical data flows that are physically realized through these three services.
+
 ### API-First Architecture
 
 All component interactions flow through REST APIs with authentication and audit logging. This provides:
@@ -54,9 +90,9 @@ For complete authentication specifications, see [Core Architecture: Authenticati
 - Service-specific RBAC policies in Keycloak
 - Short-lived tokens with minimal scope
 
-**Worker Pools** (Workers → AWS Services):
+**Worker Service** (Workers → AWS Services):
 - IAM Roles via IRSA (no long-lived credentials)
-- Least-privilege policies per worker type
+- Least-privilege policies per worker deployment
 - Kubernetes service account authentication
 
 ### Synchronous vs Asynchronous Patterns
@@ -68,7 +104,7 @@ For complete authentication specifications, see [Core Architecture: Authenticati
 
 **Asynchronous Interactions**:
 - Pipeline execution (fire-and-forget with status updates)
-- Worker pool job processing via SQS
+- Worker service job processing via SQS
 - GitOps deployments triggered by pointer file updates
 - GitHub status updates (non-blocking)
 
@@ -85,11 +121,11 @@ Project Component (CUE definitions)
 **Execution Flow** (Write Path):
 ```
 GitHub Actions
-    → Pipeline API (create run)
+    → Platform API (create run)
     → Argo Workflows (orchestration)
-    → Worker Pools (execution via SQS)
+    → Worker Service (execution via SQS)
     → AWS Services (S3, DynamoDB status tracking)
-    → Pipeline API (status updates)
+    → Platform API (status updates)
     → GitHub (commit status)
 ```
 
@@ -377,47 +413,47 @@ Output (Crossplane generates):
 
 ##### SQS (Simple Queue Service)
 
-**Purpose**: Job distribution to worker pools with reliable delivery
+**Purpose**: Job distribution to specialized worker pools with queue-based routing
+
+**Queue Architecture**:
+- **pipeline-discovery**: Discovery job queue → worker-discovery StatefulSet
+- **pipeline-tasks**: CI job queue → worker-ci StatefulSet
+- **pipeline-artifacts**: Artifact job queue → worker-artifact StatefulSet
+- **pipeline-releases**: Release/deployment queue → worker-release StatefulSet
 
 **Consumers**:
-- Pipeline Component (creates queues, submits discovery and task jobs)
-- Hot Worker Pools (consume jobs with long polling)
+- Dispatcher (sends messages based on job type)
+- Worker StatefulSets (each polls only its designated queue)
 
 **Queue Configuration**:
 ```yaml
-discovery-queue:
-  name: pipeline-discovery
+pipeline-discovery:
   visibilityTimeout: 300  # 5 minutes
   messageRetention: 3600  # 1 hour
-  maxReceiveCount: 3      # DLQ after 3 failures
 
-task-queue:
-  name: pipeline-tasks
-  visibilityTimeout: 1800  # 30 minutes
-  messageRetention: 7200   # 2 hours
-  maxReceiveCount: 3
+pipeline-tasks:
+  visibilityTimeout: 1800  # 30 minutes (long builds)
+  messageRetention: 7200  # 2 hours
+
+pipeline-artifacts:
+  visibilityTimeout: 1200  # 20 minutes (build + multi-publisher)
+  messageRetention: 3600  # 1 hour
+
+pipeline-releases:
+  visibilityTimeout: 900   # 15 minutes
+  messageRetention: 3600  # 1 hour
 ```
 
-**Message Format**:
-```json
-{
-  "job_id": "string",
-  "run_id": "string",
-  "type": "discovery|task|artifact",
-  "payload": {
-    "repository": "string",
-    "commit_sha": "string",
-    "project": "string",
-    "phase": "string",
-    "steps": ["string"]
-  },
-  "result_path": "s3://bucket/path/to/result.json"
-}
-```
+**Message Routing**:
+- Dispatcher determines target queue from job type
+- No message filtering - each queue contains only appropriate job types
+- Workers consume from single queue - no message inspection/returning
 
-**Error Handling**: Failed jobs move to DLQ after max receive count; CloudWatch alarms monitor DLQ depth
+**Dead Letter Queues**: Each queue has corresponding DLQ for failed messages
 
-**Authentication**: Workers use IRSA to access queues
+**Authentication**: Workers and Dispatcher use IRSA to access queues
+
+**Scaling**: KEDA monitors each queue independently for autoscaling
 
 **Reference**: [Execution & Orchestration: SQS Configuration](03-execution-orchestration.md#sqs-configuration)
 
@@ -426,8 +462,8 @@ task-queue:
 **Purpose**: Real-time job status tracking with automatic cleanup
 
 **Consumers**:
-- Pipeline Component (creates table, queries job status)
-- Worker Pools (update job status)
+- Platform API (creates table, queries job status)
+- Worker Service (update job status)
 - Dispatcher Pods (poll for job completion)
 
 **Schema**:
@@ -462,10 +498,10 @@ Attributes:
 **Purpose**: Storage for discovery outputs, logs, and build artifacts
 
 **Consumers**:
-- Pipeline Component (stores discovery results, logs)
-- Worker Pools (write outputs, stream logs)
-- Artifacts Component (stages artifacts before publishing)
-- All components (read logs via presigned URLs)
+- Platform API (stores discovery results, logs)
+- Worker Service (write outputs, stream logs)
+- Worker Service (stages artifacts before publishing)
+- All services (read logs via presigned URLs)
 
 **Bucket Structure**:
 ```
@@ -504,8 +540,8 @@ artifact-staging/
 **Purpose**: Secure secret storage with rotation and audit logging
 
 **Consumers**:
-- Artifacts Component (retrieves publisher credentials)
-- Worker Pools (accesses secrets during execution)
+- Worker Service (retrieves publisher credentials)
+- Worker Service (accesses secrets during execution)
 
 **Secret Organization**:
 ```
@@ -551,32 +587,31 @@ publishers/
 
 **Reference**: [Execution & Orchestration: Argo Workflows Engine](03-execution-orchestration.md#argo-workflows-engine)
 
-##### Persistent Volume Claims
+##### Persistent Volumes (StatefulSet Storage)
 
-**Purpose**: Shared cache storage for worker pools
+**Purpose**: Individual Git repository caches per worker
 
 **Consumers**:
-- Discovery Worker Pools (Git repository cache)
-- Task Worker Pools (Earthly build cache)
+- Worker StatefulSet pods (one volume per pod)
 
 **Configuration**:
 ```yaml
-discovery-cache:
-  storageClass: gp3
-  size: 100Gi
-  accessMode: ReadWriteMany
-  mountPath: /cache/repos
+storage_per_worker:
+  discovery: 50Gi
+  ci: 200Gi
+  release: 100Gi
 
-task-cache:
-  storageClass: gp3
-  size: 500Gi
-  accessMode: ReadWriteMany
-  mountPath: /cache/earthly
+storage_class: gp3  # AWS EBS
+access_mode: ReadWriteOnce  # Single pod access
+reclaim_policy: Retain  # Preserve on pod deletion
 ```
 
-**Management**: Kubernetes handles provisioning and attachment
+**Management**:
+- Kubernetes manages volume lifecycle via StatefulSet
+- Volumes persist through pod restarts
+- Manual cleanup required if StatefulSet deleted
 
-**Reference**: [Execution & Orchestration: Worker Pool Architecture](03-execution-orchestration.md#worker-pool-architecture)
+**Reference**: [Execution & Orchestration: Worker Service Architecture](03-execution-orchestration.md#worker-service-architecture)
 
 ##### ConfigMaps and Secrets
 
@@ -735,7 +770,7 @@ Worker: Earthly target failed
 - Invalid forge version → Terminate pipeline with version mismatch error
 
 **Execution Errors**:
-- Worker pool unavailable → Retry with exponential backoff (max 3 attempts)
+- Worker service unavailable → Retry with exponential backoff (max 3 attempts)
 - Step timeout → Terminate phase immediately
 - Network failures → Retry transient errors, fail persistent issues
 
@@ -882,8 +917,8 @@ All retryable operations must be idempotent:
           │ Poll                                │
           ▼                                     │
 ┌────────────────────┐                          │
-│  Discovery Worker  │                          │
-│  (Git + CUE)       │                          │
+│  Worker Service    │                          │
+│  (Discovery)       │                          │
 └─────────┬──────────┘                          │
           │                                     │
           │ Write result                        │
@@ -907,8 +942,8 @@ All retryable operations must be idempotent:
           │ Submit to SQS
           ▼
 ┌────────────────────┐
-│  Task Workers      │
-│  (Earthly)         │
+│  Worker Service    │
+│  (CI Handler)      │
 └─────────┬──────────┘
           │
           │ Update status
@@ -1206,9 +1241,9 @@ For domain entities involved in integration, see [Domain Model & API Reference](
 | Pipeline | Project | Read Config | File System | N/A |
 | Pipeline | Argo Workflows | Submit Workflow | REST | K8s Service Account |
 | Argo Dispatcher | SQS | Submit Job | AWS SDK | IRSA |
-| Worker Pool | SQS | Consume Job | AWS SDK | IRSA |
-| Worker Pool | DynamoDB | Update Status | AWS SDK | IRSA |
-| Worker Pool | S3 | Write Results | AWS SDK | IRSA |
+| Worker Service | SQS | Consume Job | AWS SDK | IRSA |
+| Worker Service | DynamoDB | Update Status | AWS SDK | IRSA |
+| Worker Service | S3 | Write Results | AWS SDK | IRSA |
 | Release | Artifacts | Build Artifacts | In-Process | N/A |
 | Release | Project | Read Config | File System | N/A |
 | Release | GitOps Repo | Update Pointer | Git | SSH Key |

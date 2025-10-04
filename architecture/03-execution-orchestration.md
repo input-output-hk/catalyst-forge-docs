@@ -19,7 +19,7 @@ Users interact exclusively through the database layer, having no direct Kubernet
 
 ### Earthly Remote Execution
 
-All build work executes on remote Earthly runners. Worker pools maintain persistent connections to Earthly infrastructure, eliminating connection overhead and maximizing throughput.
+All build work executes on remote Earthly runners. Worker service maintains persistent connections to Earthly infrastructure, eliminating connection overhead and maximizing throughput.
 
 ### OCI Image Types in Pipeline Context
 
@@ -51,15 +51,15 @@ The Pipeline Component consists of four primary subsystems:
 - Provides built-in UI for workflow visualization
 - Runs lightweight dispatcher pods for job submission
 
-**Hot Worker Pools**
+**Worker Service**
 - Persistent pods with cached repositories and warm Earthly connections
-- Discovery Pool: Performs repository discovery with cached checkouts
-- Task Pool: Executes Earthly targets with pre-established connections
+- Discovery Handler: Performs repository discovery with cached checkouts
+- CI Handler: Executes Earthly targets with pre-established connections
 - Consumes jobs from SQS queues
 - Reports status to DynamoDB and API
 
 **AWS Infrastructure**
-- SQS: Distributes jobs to worker pools
+- SQS: Distributes jobs to worker service
 - DynamoDB: Tracks job execution status
 - S3: Stores discovery outputs, logs, and artifacts
 - IAM: Manages service authentication via IRSA
@@ -77,41 +77,336 @@ PipelineRun Workflow (root)
     └── Artifact Building Dispatchers
 ```
 
-Dispatchers submit jobs to SQS and poll DynamoDB for completion, while actual work happens in hot worker pools.
+Dispatchers submit jobs to SQS and poll DynamoDB for completion, while actual work happens in the Worker service.
 
-### Worker Pool Architecture
+### Worker Service Architecture
 
-#### Hot Discovery Pool
+The Worker service provides unified execution for all platform job types, maintaining efficiency through shared resources and intelligent routing.
 
-Maintains a fleet of persistent pods optimized for repository discovery:
+#### Unified Worker Design
 
-**Capabilities:**
-- Cached repository checkouts using Git bare repositories
-- Git worktree management for concurrent operations
-- CUE configuration parsing and validation
-- Release trigger evaluation
+The Worker service consolidates all asynchronous execution into a single codebase that:
+- Polls SQS queues for jobs
+- Routes to appropriate internal handlers based on job type
+- Maintains a shared Git repository cache
+- Manages Earthly connections for CI operations
+- Reports status to DynamoDB and S3
 
-**Optimization Strategies:**
-- Maintains bare Git repositories with periodic fetches
-- Creates lightweight worktrees for specific commits
-- Caches parsed CUE configurations
-- Pre-warms popular repository caches
+**Internal Job Handlers**:
+- **Discovery Handler**: Traverses repositories, parses CUE configurations, evaluates release triggers
+- **CI Handler**: Executes Earthly targets for test and build phases
+- **Artifact Handler**: Orchestrates producers and publishers, generates SBOMs, creates tracking images
+- **Release Handler**: Renders CUE to Kubernetes resources, packages Release OCI images
+- **Deployment Handler**: Updates GitOps repository pointer files
 
-#### Hot Task Pool
+#### Queue Consumption Pattern
 
-Maintains a fleet of persistent pods optimized for Earthly execution:
+Each worker StatefulSet is configured to poll from exactly one SQS queue:
 
-**Capabilities:**
-- Pre-established Earthly runner connections
-- Cached repository checkouts
-- Certificate and credential caching
-- Parallel step execution per project
+```yaml
+# Worker environment configuration
+worker-discovery:
+  env:
+    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-discovery"
+    WORKER_TYPE: "discovery"
 
-**Optimization Strategies:**
-- Connection pooling to Earthly runners
-- Repository cache sharing with discovery pool
-- Build cache persistence across executions
-- Intelligent work routing based on cache warmth
+worker-ci:
+  env:
+    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-tasks"
+    WORKER_TYPE: "ci"
+
+worker-artifact:
+  env:
+    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-artifacts"
+    WORKER_TYPE: "artifact"
+
+worker-release:
+  env:
+    QUEUE_URL: "https://sqs.region.amazonaws.com/account/pipeline-releases"
+    WORKER_TYPE: "release"
+```
+
+**Message Processing**:
+```go
+func (w *Worker) processMessages() {
+    for {
+        // Long poll from designated queue
+        result, err := w.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+            QueueUrl:         &w.queueURL,
+            WaitTimeSeconds:  20,
+            MaxNumberOfMessages: 1,
+        })
+
+        if err != nil || len(result.Messages) == 0 {
+            continue
+        }
+
+        message := result.Messages[0]
+        job := parseJob(message.Body)
+
+        // Process based on worker type
+        switch w.workerType {
+        case "discovery":
+            w.handleDiscoveryJob(job)
+        case "ci":
+            w.handleCIJob(job)
+        case "artifact":
+            w.handleArtifactJob(job)  // Build + publish atomic
+        case "release":
+            w.handleReleaseJob(job)  // Includes deployment
+        }
+
+        // Delete message on success
+        w.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+            QueueUrl:      &w.queueURL,
+            ReceiptHandle: message.ReceiptHandle,
+        })
+    }
+}
+```
+
+This ensures workers only process jobs appropriate for their resource allocation and configuration.
+
+#### Deployment Strategy
+
+The Worker service deploys as multiple Kubernetes **StatefulSets** to provide persistent Git caches:
+
+```yaml
+# Discovery workloads - memory optimized for Git operations
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: worker-discovery
+spec:
+  replicas: 3
+  serviceName: worker-discovery
+  volumeClaimTemplates:
+  - metadata:
+      name: git-cache
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 50Gi
+  template:
+    spec:
+      containers:
+      - name: worker
+        resources:
+          requests: { cpu: 1, memory: 2Gi }
+          limits: { cpu: 2, memory: 4Gi }
+        volumeMounts:
+        - name: git-cache
+          mountPath: /cache/repos
+
+# CI workloads - CPU/memory intensive for builds
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: worker-ci
+spec:
+  replicas: 10
+  serviceName: worker-ci
+  volumeClaimTemplates:
+  - metadata:
+      name: git-cache
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 200Gi
+  template:
+    spec:
+      containers:
+      - name: worker
+        resources:
+          requests: { cpu: 4, memory: 8Gi }
+          limits: { cpu: 8, memory: 16Gi }
+        volumeMounts:
+        - name: git-cache
+          mountPath: /cache/repos
+
+# Artifact workloads - CPU/memory intensive like CI, with Docker daemon
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: worker-artifact
+spec:
+  replicas: 5
+  serviceName: worker-artifact
+  volumeClaimTemplates:
+  - metadata:
+      name: git-cache
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 150Gi
+  template:
+    spec:
+      containers:
+      - name: worker
+        resources:
+          requests: { cpu: 3, memory: 6Gi }
+          limits: { cpu: 6, memory: 12Gi }
+        volumeMounts:
+        - name: git-cache
+          mountPath: /cache/repos
+        - name: docker-socket
+          mountPath: /var/run/docker.sock  # For Docker daemon access
+      volumes:
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
+
+# Release workloads - balanced for packaging operations
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: worker-release
+spec:
+  replicas: 3
+  serviceName: worker-release
+  volumeClaimTemplates:
+  - metadata:
+      name: git-cache
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 100Gi
+  template:
+    spec:
+      containers:
+      - name: worker
+        resources:
+          requests: { cpu: 2, memory: 4Gi }
+          limits: { cpu: 4, memory: 8Gi }
+        volumeMounts:
+        - name: git-cache
+          mountPath: /cache/repos
+```
+
+**StatefulSet Advantages**:
+- Each worker pod gets a stable persistent volume (e.g., `worker-ci-0`, `worker-ci-1`)
+- Git caches persist across pod restarts and updates
+- Cache gradually warms up as workers process jobs for different repositories
+- With 10-15 total repositories, each worker will cache most/all repos over time
+
+#### Persistent Git Cache
+
+Each worker maintains its own persistent Git repository cache:
+
+**Cache Characteristics**:
+- Individual persistent volumes per worker pod (via StatefulSet)
+- Bare repositories to minimize storage
+- Worktrees for concurrent operations
+- Cache persists across pod restarts and rolling updates
+
+**Cache Operations**:
+```bash
+# On job start, worker checks if repo exists
+if [ ! -d /cache/repos/$REPO.git ]; then
+    git clone --bare $REPO_URL /cache/repos/$REPO.git
+fi
+
+# Fetch latest changes for the specific commit
+cd /cache/repos/$REPO.git
+git fetch origin $COMMIT_SHA
+
+# Create worktree for this job
+git worktree add /workspace/$JOB_ID $COMMIT_SHA
+
+# After job completion
+git worktree remove /workspace/$JOB_ID
+```
+
+**Cache Warmup**:
+- Initial jobs experience cache misses (clone required)
+- Within hours, most workers cache all active repositories
+- Subsequent jobs hit cache ~90% of time (fetch only)
+- Rolling updates preserve caches (StatefulSet persistent volumes)
+
+**Storage Sizing**:
+- Discovery workers: 50Gi (multiple small repos)
+- CI workers: 200Gi (monorepos with history)
+- Release workers: 100Gi (moderate usage)
+
+#### Scaling with KEDA
+
+Each worker StatefulSet scales independently based on its queue depth:
+
+```yaml
+# Discovery worker scaler
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-discovery-scaler
+spec:
+  scaleTargetRef:
+    name: worker-discovery
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+  - type: aws-sqs-queue
+    metadata:
+      queueURL: https://sqs.region.amazonaws.com/account/pipeline-discovery
+      queueLength: "5"  # Target 5 messages per worker
+
+# CI worker scaler
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-ci-scaler
+spec:
+  scaleTargetRef:
+    name: worker-ci
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  triggers:
+  - type: aws-sqs-queue
+    metadata:
+      queueURL: https://sqs.region.amazonaws.com/account/pipeline-tasks
+      queueLength: "2"  # Target 2 messages per worker (builds are slow)
+
+# Artifact worker scaler
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-artifact-scaler
+spec:
+  scaleTargetRef:
+    name: worker-artifact
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: aws-sqs-queue
+    metadata:
+      queueURL: https://sqs.region.amazonaws.com/account/pipeline-artifacts
+      queueLength: "2"  # Target 2 messages per worker (build + publish)
+
+# Release worker scaler
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-release-scaler
+spec:
+  scaleTargetRef:
+    name: worker-release
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: aws-sqs-queue
+    metadata:
+      queueURL: https://sqs.region.amazonaws.com/account/pipeline-releases
+      queueLength: "3"  # Target 3 messages per worker
+```
+
+Independent scaling ensures each job type gets appropriate resources without over-provisioning.
 
 #### Queue Processing
 
@@ -198,45 +493,95 @@ The Discovery output drives the entire workflow through Argo's dynamic generatio
 
 #### Dispatcher Templates
 
-Argo Workflows run lightweight dispatcher pods that interface between orchestration and execution. These dispatchers are **platform-provided Go binaries** packaged in custom container images.
+Argo Workflows run lightweight dispatcher pods that interface between orchestration and execution. The dispatcher is a **single platform-provided Go binary** that routes jobs to appropriate queues based on job type.
 
-**Dispatcher Responsibilities**:
-- Submit jobs to SQS queues with job specifications
-- Poll DynamoDB for job completion status
-- Fetch results from S3 when jobs complete
-- Return outputs as Argo Workflow parameters
-- Update API status for progress tracking
+**Queue Routing Logic**:
+```go
+func (d *Dispatcher) submitJob(job Job) error {
+    var queueURL string
 
-**Discovery Dispatcher Template**:
-```yaml
-- name: discovery-dispatcher
-  container:
-    image: forge.io/platform/dispatcher:v1.0.0  # Platform-provided Go binary
-    command: ["/dispatcher"]
-    args:
-      - "discovery"
-      - "--repo={{inputs.parameters.repo}}"
-      - "--commit={{inputs.parameters.commit}}"
-      - "--output=/tmp/discovery.json"
-  outputs:
-    parameters:
-    - name: discovery-output
-      valueFrom:
-        path: /tmp/discovery.json
+    switch job.Type {
+    case JobTypeDiscovery:
+        queueURL = d.discoveryQueueURL  // pipeline-discovery
+    case JobTypeCI:
+        queueURL = d.taskQueueURL       // pipeline-tasks
+    case JobTypeArtifact:
+        queueURL = d.artifactQueueURL   // pipeline-artifacts
+    case JobTypeRelease, JobTypeDeployment:
+        queueURL = d.releaseQueueURL    // pipeline-releases
+    default:
+        return fmt.Errorf("unknown job type: %s", job.Type)
+    }
+
+    return d.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
+        QueueUrl:    &queueURL,
+        MessageBody: aws.String(job.ToJSON()),
+    })
+}
 ```
 
-**Task Dispatcher Template**:
+**Dispatcher Configuration via Environment Variables**:
 ```yaml
-- name: task-dispatcher
+- name: dispatcher
   container:
-    image: forge.io/platform/dispatcher:v1.0.0  # Platform-provided Go binary
-    command: ["/dispatcher"]
-    args:
-      - "task"
-      - "--project={{inputs.parameters.project}}"
-      - "--phase={{inputs.parameters.phase}}"
-      - "--steps={{inputs.parameters.steps}}"
+    image: forge.io/platform/dispatcher:v1.0.0
+    env:
+    - name: DISCOVERY_QUEUE_URL
+      value: "https://sqs.region.amazonaws.com/account/pipeline-discovery"
+    - name: TASK_QUEUE_URL
+      value: "https://sqs.region.amazonaws.com/account/pipeline-tasks"
+    - name: ARTIFACT_QUEUE_URL
+      value: "https://sqs.region.amazonaws.com/account/pipeline-artifacts"
+    - name: RELEASE_QUEUE_URL
+      value: "https://sqs.region.amazonaws.com/account/pipeline-releases"
+    - name: JOB_TYPE
+      value: "discovery"  # Set by Argo based on workflow stage
 ```
+
+#### Release Phase Orchestration
+
+The release phase requires special orchestration to handle artifact parallelization:
+
+**Workflow Structure**:
+```
+1. Dispatcher evaluates release triggers from discovery
+2. For each triggered project:
+   a. Queue all artifact jobs in parallel
+   b. Wait for all artifacts to complete
+   c. Collect artifact metadata from S3
+   d. Queue release job with artifact data
+   e. Wait for release completion
+```
+
+**Multi-Job Dispatcher Logic**:
+```go
+func (d *Dispatcher) executeReleasePhase(project Project) error {
+    // Phase 1: Parallel artifact creation
+    artifactJobs := []JobResult{}
+    for _, artifact := range project.Artifacts {
+        jobID := d.queueJob(JobTypeArtifact, artifact)
+        artifactJobs = append(artifactJobs, JobResult{ID: jobID})
+    }
+
+    // Phase 2: Wait and collect results
+    artifactData := []ArtifactResult{}
+    for _, job := range artifactJobs {
+        result := d.waitForJobWithData(job.ID)
+        artifactData = append(artifactData, result)
+    }
+
+    // Phase 3: Create release with artifact data
+    releaseJobID := d.queueJob(JobTypeRelease, ReleasePayload{
+        Project:   project,
+        Artifacts: artifactData,
+    })
+
+    // Phase 4: Wait for release completion
+    return d.waitForJob(releaseJobID)
+}
+```
+
+This ensures artifacts build in parallel while maintaining data flow to the release step.
 
 ### AWS Infrastructure
 
@@ -244,52 +589,150 @@ For AWS authentication patterns, see [Core Architecture: Authentication & Author
 
 #### SQS Configuration
 
+The platform uses four separate SQS queues for different job types:
+
 ```yaml
 queues:
-  discovery:
+  # Discovery operations - project discovery and configuration parsing
+  pipeline-discovery:
     name: pipeline-discovery
-    visibilityTimeout: 300
-    messageRetention: 3600
-    maxReceiveCount: 3
-  tasks:
+    visibilityTimeout: 300  # 5 minutes
+    messageRetention: 3600  # 1 hour
+    consumers: worker-discovery StatefulSet
+
+  # CI operations - test and build phase execution
+  pipeline-tasks:
     name: pipeline-tasks
-    visibilityTimeout: 1800
-    messageRetention: 7200
-    maxReceiveCount: 3
+    visibilityTimeout: 1800  # 30 minutes (builds can be slow)
+    messageRetention: 7200  # 2 hours
+    consumers: worker-ci StatefulSet
+
+  # Artifact operations - build and publish artifacts atomically
+  pipeline-artifacts:
+    name: pipeline-artifacts
+    visibilityTimeout: 1200  # 20 minutes (build + multi-publisher)
+    messageRetention: 3600  # 1 hour
+    consumers: worker-artifact StatefulSet
+
+  # Release operations - release packaging and deployment
+  pipeline-releases:
+    name: pipeline-releases
+    visibilityTimeout: 900   # 15 minutes
+    messageRetention: 3600  # 1 hour
+    consumers: worker-release StatefulSet
 ```
 
-#### DynamoDB Job Tracking
+**Queue Selection Logic**:
+- `discovery` jobs → `pipeline-discovery`
+- `ci` jobs (test, build phases) → `pipeline-tasks`
+- `artifact` jobs (build + publish atomic) → `pipeline-artifacts`
+- `release` and `deployment` jobs → `pipeline-releases`
 
-**PipelineJob Table**
+**Parallelization**: The artifact queue enables parallel building of multiple artifacts during the release phase, with each worker handling one complete artifact lifecycle (build + publish).
+
+### Result Handling Patterns
+
+The platform uses two distinct patterns for job result handling:
+
+#### Data-Returning Jobs
+
+Jobs that produce data needed by subsequent workflow steps:
+
+**Discovery Jobs**:
+- Output: Project list, phase groups, release triggers
+- Storage: S3 at `pipeline-runs/{run_id}/discovery/output.json`
+- Usage: Argo Workflows uses for dynamic workflow generation
+
+**Artifact Jobs**:
+- Output: Artifact URIs, tracking image references, metadata
+- Storage: S3 at `pipeline-runs/{run_id}/artifacts/{project}/{artifact}/result.json`
+- Usage: Release job uses to create Release entity
+
+**Flow**:
 ```
+Worker → S3 (result.json) → DynamoDB (status + S3 location)
+Dispatcher polls DynamoDB → Fetches from S3 → Returns data to Argo
+```
+
+#### Status-Only Jobs
+
+Jobs that perform operations and update domain entities:
+
+**CI Tasks** (test, build phases):
+- Updates: StepExecution entities via Platform API
+- Returns: Success/failure status only
+
+**Release Jobs**:
+- Updates: Release entity via Platform API
+- Returns: Success/failure status only
+
+**Deployment Jobs**:
+- Updates: Deployment entity via Platform API
+- Returns: Success/failure status only
+
+**Flow**:
+```
+Worker → Platform API (entity updates) → DynamoDB (status only)
+Dispatcher polls DynamoDB → Returns status to Argo
+```
+
+#### DynamoDB Schema
+
+```
+Table: pipeline-jobs
 Fields:
-- job_id: string (Primary Key)
-- run_id: string
-- type: enum (discovery, task, artifact)
+- job_id: string (PK)
 - status: enum (pending, running, completed, failed)
-- result_location: string (S3 URI)
-- created_at: timestamp
+- error_message: string (optional - for failures)
+- result_location: string (optional - S3 URI for data-returning jobs)
 - updated_at: timestamp
-- ttl: timestamp (auto-cleanup)
-```
-
-Configuration:
-```yaml
-table: pipeline-jobs
-billingMode: PAY_PER_REQUEST
-ttl: 604800  # 7 days
+- ttl: timestamp (auto-cleanup after 7 days)
 ```
 
 #### S3 Storage
 
-```yaml
-buckets:
-  results: pipeline-results
-  logs: pipeline-logs
-lifecycle:
-  results: 7d
-  logs: 90d
+**Bucket Structure**:
 ```
+forge-platform-bucket/
+└── pipeline-runs/
+    └── {run_id}/
+        ├── discovery/
+        │   └── output.json          # Discovery results
+        ├── artifacts/
+        │   └── {project}/{artifact}/
+        │       └── result.json       # Artifact metadata
+        └── logs/
+            └── {phase}/{project}/{step}.log  # Execution logs
+```
+
+**Lifecycle Management**:
+
+AWS S3 Lifecycle Policies handle automatic cleanup:
+
+```yaml
+lifecycle_rules:
+  - id: discovery-cleanup
+    prefix: pipeline-runs/*/discovery/
+    expiration:
+      days: 7
+
+  - id: artifact-results-cleanup
+    prefix: pipeline-runs/*/artifacts/
+    expiration:
+      days: 7
+
+  - id: logs-cleanup
+    prefix: pipeline-runs/*/logs/
+    expiration:
+      days: 90
+```
+
+**Access Patterns**:
+- Workers write directly using IRSA credentials
+- Platform API generates presigned URLs for user access
+- Dispatchers read results using IRSA credentials
+
+No custom cleanup service required - AWS manages lifecycle automatically.
 
 ## Execution Flow
 
@@ -307,7 +750,7 @@ lifecycle:
 2. **Discovery**
    - Workflow executes discovery dispatcher
    - Dispatcher submits job to SQS
-   - Hot discovery worker picks up job
+   - Worker service (discovery handler) picks up job
    - Worker uses cached repo to perform discovery
    - Worker writes result to S3, updates DynamoDB
    - Dispatcher polls, retrieves result, sets as output parameter
@@ -318,7 +761,7 @@ lifecycle:
    - API updates GitHub status: "Running phase X of Y"
    - For each phase, spawns parallel task dispatchers
    - Dispatchers submit all project steps to SQS
-   - Hot workers execute Earthly targets
+   - Worker service (CI handler) executes Earthly targets
    - Workers report status to API and DynamoDB
    - Logs stream directly to S3
 
@@ -330,7 +773,7 @@ lifecycle:
 
 5. **Release Creation** (if triggered)
    - Workflow conditionally executes release dispatchers
-   - Artifact jobs submitted to worker pool
+   - Artifact jobs submitted to worker service
    - Workers build and publish artifacts
    - Release OCI generated and pushed
    - Optional deployment triggered
@@ -404,7 +847,7 @@ templates:
         memory: 256Mi
 ```
 
-### Worker Pool Configuration
+### Worker Service Configuration
 
 ```yaml
 discovery-pool:
@@ -480,7 +923,7 @@ metrics:
 - Pipeline run duration (histogram)
 - Phase execution time (histogram)
 - Queue depth (gauge)
-- Worker pool utilization (gauge)
+- Worker service utilization (gauge)
 - Cache hit rates (counter)
 - Job processing time (histogram)
 
@@ -530,7 +973,7 @@ Grafana Cloud maintains a CloudWatch integration that polls AWS metrics periodic
 - DLQ for persistent failures
 - CloudWatch alarms for DLQ depth
 
-**Worker Pool Failures:**
+**Worker Service Failures:**
 - Kubernetes automatically restarts failed workers
 - Jobs returned to queue after visibility timeout
 - Circuit breakers for Earthly connections
@@ -762,7 +1205,7 @@ For execution examples and integration patterns, see [Integration Contracts: Com
 
 ### Planned Improvements
 
-- Multi-region worker pools for disaster recovery
+- Multi-region worker service deployments for disaster recovery
 - Alternative execution engines beyond Earthly
 - Cross-repository pipeline dependencies
 - Predictive scaling based on historical patterns
@@ -770,8 +1213,7 @@ For execution examples and integration patterns, see [Integration Contracts: Com
 
 ### Optimization Opportunities
 
-- Distributed cache using Redis/Elasticache
-- P2P cache sharing between workers
+- Distributed cache using Redis/Elasticache for build artifacts
 - Incremental discovery for monorepos
 - GPU-enabled workers for ML workloads
 

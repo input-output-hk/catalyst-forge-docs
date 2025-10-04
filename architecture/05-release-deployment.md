@@ -263,13 +263,23 @@ release?: {
 
 ### Component Structure
 
-The Release Component consists of three primary subsystems:
+The Release Component's logic is implemented across the platform services:
 
-**Release Orchestrator** coordinates the entire release lifecycle. It manages artifact building, resource rendering, OCI packaging, and database persistence. The orchestrator ensures atomic release creation—either all components succeed or the entire release fails.
+**Release Orchestration** - Argo Workflows coordinates the release lifecycle by dispatching jobs to workers. The orchestration flow is defined in workflow templates that sequence artifact building, resource rendering, and OCI packaging.
 
-**OCI Builder** packages rendered Kubernetes resources and metadata into standardized OCI images. It creates a two-layer structure optimized for both human inspection and machine consumption, with metadata separated from resources for efficient retrieval.
+**Release Handler** (within Worker service) - Executes release operations including:
+- Invoking artifact handlers for building and publishing
+- Rendering CUE configurations to Kubernetes resources
+- Packaging resources and metadata into Release OCI images
+- Updating release records via Platform API
 
-**Deployment Manager** handles the progression of releases through environments. It evaluates deployment policies, manages approvals, and updates GitOps pointer files to trigger actual deployments via Argo CD.
+**Deployment Manager** (within Platform API) - Handles deployment lifecycle:
+- Evaluates deployment policies
+- Manages approval workflows
+- Triggers Worker jobs for GitOps updates
+- Tracks deployment status
+
+This distributed implementation maintains clear separation between orchestration (Argo), execution (Worker), and state management (API).
 
 ### Error Handling
 
