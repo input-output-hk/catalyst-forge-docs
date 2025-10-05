@@ -293,6 +293,7 @@ gitops-repo/
 - **Crossplane**: Handles XR to resource transformation
 
 ### Composition Functions
+
 All XRDs use Python-based composition functions that:
 - Load and merge EnvironmentConfigs
 - Apply resolution precedence
@@ -306,6 +307,95 @@ All XRDs use Python-based composition functions that:
   - For `connections/<xr>/<key>`: ensure same namespace, request producer XR, read its connection-details Secret name, set `secretKeyRef` pointing to that Secret
   - For `secrets/<xr>/<secret>/[key]`: set `secretKeyRef` to the appropriate key in Secret from Secrets XRD
   - For `configs/<xr>/<config>/[key]`: set `configMapKeyRef` to the appropriate key in ConfigMap from ConfigMaps XRD
+
+#### Composition Selection and Infrastructure Providers
+
+Crossplane compositions support label-based selection, enabling the same XRD to have multiple composition implementations. This mechanism allows different infrastructure providers to be selected based on environment configuration without changing application XR definitions.
+
+**Label Selector Pattern:**
+
+Compositions are labeled with metadata describing their infrastructure provider or profile:
+
+```yaml
+# AWS-based composition
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: database-aws
+  labels:
+    provider: aws
+    profile: production
+spec:
+  compositeTypeRef:
+    apiVersion: forge.io/v1
+    kind: XDatabase
+  # ... AWS RDS resources
+```
+
+```yaml
+# On-premises composition using Bitnami Helm chart
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: database-onprem
+  labels:
+    provider: helm
+    profile: onprem
+spec:
+  compositeTypeRef:
+    apiVersion: forge.io/v1
+    kind: XDatabase
+  # ... Helm release for PostgreSQL
+```
+
+**Selection via EnvironmentConfig:**
+
+The environment configuration specifies composition selection criteria that apply to all XRs deployed in that environment:
+
+```yaml
+apiVersion: apiextensions.crossplane.io/v1
+kind: EnvironmentConfig
+metadata:
+  name: production-aws
+data:
+  compositionSelector:
+    matchLabels:
+      provider: aws
+      profile: production
+```
+
+```yaml
+apiVersion: apiextensions.crossplane.io/v1
+kind: EnvironmentConfig
+metadata:
+  name: onprem-dev
+data:
+  compositionSelector:
+    matchLabels:
+      provider: helm
+      profile: onprem
+```
+
+**Composition Functions for Conditional Logic:**
+
+For scenarios requiring runtime decision logic, composition functions enable branching based on XR specifications, labels, or environment data. Functions can inspect the composite resource and select appropriate managed resources dynamically:
+
+```python
+def compose(req: CompositionRequest) -> CompositionResult:
+    # Access environment config
+    env_config = req.environment_configs[0]
+    provider = env_config.data.get("provider", "aws")
+
+    # Branch based on provider
+    if provider == "aws":
+        return compose_aws_resources(req)
+    elif provider == "onprem":
+        return compose_helm_resources(req)
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+```
+
+This architecture ensures applications remain portable while infrastructure provisioning adapts to the deployment environment. Applications declare requirements through XRs without specifying implementation details, and the platform selects appropriate compositions based on environment configuration.
 
 ## Security Model
 

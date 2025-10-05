@@ -409,14 +409,28 @@ For complete environment configuration specifications, see [Infrastructure Abstr
 
 ### Secret Management
 
+#### Port Contract: Secrets Synchronization
+
+The platform defines a contract for external secret synchronization: references to external secret storage systems are materialized as Kubernetes Secret resources. This contract allows different secret backends to be used without changing application configuration.
+
+**Contract Requirements:**
+
+An adapter for this port must provide:
+- Mechanism to reference secrets stored in external systems using a path or identifier scheme
+- Synchronization of external secret values into Kubernetes Secret resources
+- Authentication to the secret backend using cluster-native mechanisms
+- Support for secret refresh to handle rotation and updates
+- Hierarchical organization supporting environment-specific and global secret scopes
+
+**Adapter Implementations:**
+
+**AWS Secrets Manager (Production):** Currently implemented using External Secrets Operator. Provides IRSA-based authentication, automatic rotation support, and CloudWatch audit logging integration.
+
+**External Secret Stores (On Premises):** Architecture supports integration with vault solutions or secret management systems that provide versioning, dynamic secret generation, and path-based organization through External Secrets Operator.
+
 For complete secret management patterns and schemas, see [Core Architecture: Secret Management Patterns](01-core-architecture.md#secret-management-patterns).
 
-Secret references are used consistently across:
-- CI step configurations
-- Publisher credentials
-- Any other secret reference
-
-Secret values are never stored in configuration files. The platform resolves references at runtime using the provider-specific schemas defined in Core Architecture.
+Secret references are used consistently across CI step configurations, publisher credentials, and other secret access points. Secret values are never stored in configuration files. The platform resolves references at runtime using the provider-specific schemas defined in Core Architecture.
 
 ## Operations
 

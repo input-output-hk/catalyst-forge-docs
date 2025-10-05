@@ -283,10 +283,98 @@ Database credentials follow hierarchical structure:
 - Credentials synchronized via External Secrets
 
 #### Storage Classes
-EBS-backed persistent volumes with multiple storage classes:
-- `gp3` (default): General purpose SSD
-- `io1`: High-performance SSD for databases
-- Snapshot support for backup/restore operations
+
+The platform defines abstract storage classes that map to appropriate underlying storage providers based on the deployment environment. This abstraction enables applications to request storage characteristics without coupling to specific infrastructure implementations.
+
+**Abstract Storage Classes:**
+
+**`fast`:** High-performance storage for latency-sensitive workloads requiring consistent IOPS. Suitable for transactional databases, key-value stores, and applications with strict performance requirements.
+
+**`standard`:** Balanced performance and cost for general-purpose workloads. Appropriate for most application persistent volumes, caches, and medium-performance databases.
+
+**`bulk`:** Cost-optimized storage for large data volumes with infrequent access patterns. Designed for archives, backups, batch processing data, and log storage.
+
+**Environment-Specific Mappings:**
+
+**Production (AWS/EKS):**
+- `fast` → io2 (provisioned IOPS SSD with high durability)
+- `standard` → gp3 (general purpose SSD with baseline performance)
+- `bulk` → sc1 (cold HDD for throughput-optimized workloads)
+
+**On Premises:**
+- `fast` → Longhorn/OpenEBS high-performance tier, NVMe local storage, or Ceph with SSD pools
+- `standard` → Longhorn/OpenEBS standard tier or Ceph with HDD pools
+- `bulk` → Network-attached storage or Ceph with erasure coding for capacity optimization
+
+Applications reference abstract classes in their Storage XRD specifications. The platform's EnvironmentConfig system resolves these to concrete StorageClass names at deployment time, ensuring applications remain portable across environments.
+
+### Observability Architecture
+
+The platform standardizes on Grafana Alloy Operator for metrics collection and log aggregation across all environments. Alloy provides a unified agent that handles both metrics scraping and log collection, with configurable output destinations based on the deployment profile.
+
+**Grafana Alloy Components:**
+
+The Alloy agent operates as a DaemonSet on cluster nodes, collecting metrics and logs through a component-based architecture:
+
+**`prometheus.scrape`:** Discovers and scrapes Prometheus metrics endpoints from platform services and applications. Supports service discovery via Kubernetes annotations and label selectors.
+
+**`loki.source.kubernetes`:** Collects container logs from all pods. Enriches log entries with Kubernetes metadata including namespace, pod name, container name, and labels.
+
+**`prometheus.remote_write`:** Forwards collected metrics to configured Prometheus-compatible endpoints. Supports buffering, retry logic, and compression.
+
+**`loki.write`:** Ships collected logs to configured Loki endpoints. Handles batching, compression, and automatic retry on failures.
+
+**Output Configuration by Environment:**
+
+**Production (AWS/EKS) - Grafana Cloud:**
+```yaml
+prometheus.remote_write "cloud" {
+  endpoint {
+    url = "https://prometheus-prod-us-central-0.grafana.net/api/prom/push"
+    basic_auth {
+      username = "<prometheus-user-id>"
+      password = env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}
+
+loki.write "cloud" {
+  endpoint {
+    url = "https://logs-prod-us-central-0.grafana.net/loki/api/v1/push"
+    basic_auth {
+      username = "<loki-user-id>"
+      password = env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}
+```
+
+**On Premises - In-Cluster Prometheus and Loki:**
+```yaml
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus.observability.svc.cluster.local:9090/api/v1/write"
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+  }
+}
+```
+
+The Alloy configuration remains structurally identical across environments, with only endpoint URLs and authentication differing. This uniformity ensures consistent observability capabilities whether operating in cloud-managed services or self-hosted infrastructure.
+
+**In-Cluster Stack Components (On Premises):**
+
+When operating with in-cluster observability, the platform deploys:
+
+**Prometheus:** Time-series metrics database with local retention (typically 15-30 days). Configured with appropriate storage capacity based on cluster size and metric volume.
+
+**Loki:** Log aggregation system with configurable retention. Utilizes object storage backend (MinIO, S3-compatible) for long-term log retention beyond active query window.
+
+**Grafana:** Unified dashboarding and visualization. Pre-configured with datasources for local Prometheus and Loki instances, including platform-specific dashboards for pipeline execution, resource utilization, and application health.
 
 ## Architectural Boundaries
 

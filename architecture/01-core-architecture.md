@@ -23,6 +23,34 @@ Catalyst Forge manages the complete SDLC from commit to deployment for a growing
 - Not a general-purpose CI/CD system with infinite flexibility
 - Not a multi-orchestrator solution (Kubernetes only)
 
+### Environment Profiles
+
+The platform architecture is designed to run across different environments by selecting appropriate adapters for each port contract. Two primary deployment profiles are supported:
+
+**Production (AWS/EKS):** Utilizes AWS-managed services and native integrations where appropriate. AWS-specific adapters are employed for DNS management (Route53), secret storage (AWS Secrets Manager), object storage (S3), and container registries (ECR).
+
+**On Premises (Kubernetes):** Executes on any Kubernetes distribution, including bare metal deployments and virtual cluster environments. Non-AWS adapters provide equivalent functionality through alternative implementations such as Cloudflare for DNS, Vault for secrets, MinIO for object storage, and Harbor for container registries.
+
+The architecture ensures that environments differ only in adapter configuration, not in application manifests or domain API contracts. Applications deploy identically across both profiles.
+
+### Ports and Adapters
+
+The platform defines port contracts that specify expected behaviors, allowing different adapter implementations to fulfill these contracts based on the deployment environment. The following table outlines the core port contracts and their available adapters:
+
+| Port Contract | Production Adapters | On Premises Adapters |
+|--------------|---------------------|----------------------|
+| **DNS Management:** Applications declare hostnames, DNS records created via Kubernetes resources | ExternalDNS with Route53 | ExternalDNS with Cloudflare, PowerDNS, or RFC2136 |
+| **Layer 7 Routing:** Kubernetes Gateway API for ingress policy | Envoy Gateway | Envoy Gateway |
+| **Secrets Synchronization:** External secret references materialized as Kubernetes Secrets | External Secrets Operator with AWS Secrets Manager | External Secrets Operator with Vault, or Kubernetes Secrets |
+| **Object Storage:** S3-compatible operations including put, get, and signed URLs | Amazon S3 | MinIO, Ceph RGW, or S3-compatible storage |
+| **Container Registry:** OCI artifact push and pull operations | Amazon ECR, Harbor | Harbor with S3 or filesystem backends, Docker Registry |
+| **Observability:** Metrics collection, log aggregation, and trace storage | Grafana Alloy Operator with Grafana Cloud | Grafana Alloy with in-cluster Prometheus, Loki, and Grafana |
+| **Persistent Volumes:** Storage provisioned via abstract StorageClass | EBS CSI Driver (gp3/gp2 volumes) | Longhorn, OpenEBS, or vendor CSI drivers |
+| **Messaging:** Durable message streaming with consumer groups | NATS JetStream | NATS JetStream |
+| **Infrastructure Provisioning:** Declarative infrastructure via Crossplane XRDs | Crossplane provider-aws (optional) | Crossplane provider-helm, provider-kubernetes, composition functions |
+
+Applications interact exclusively with port contracts. The platform binds appropriate adapters based on the active environment profile. Adapter selection occurs at deployment time through environment-specific configuration, requiring no changes to application definitions.
+
 ### Architectural Principles & Constraints
 
 #### 1. Convention with Escape Hatches

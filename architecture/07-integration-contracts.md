@@ -447,9 +447,17 @@ deployment:
 
 #### AWS Services
 
-##### S3 (Simple Storage Service)
+##### Object Storage
 
-**Purpose**: Storage for logs and large job results
+**Purpose**: Storage for logs, artifacts, and large job results
+
+**Port Contract**: S3-compatible API for object storage operations
+
+**Adapter Implementations:**
+
+**Amazon S3 (Production):** Currently implemented. Managed object storage with IRSA authentication, lifecycle policies for automatic cleanup, versioning, and replication capabilities.
+
+**S3-Compatible Storage (On Premises):** Architecture supports object storage systems providing S3-compatible APIs. Implementations can utilize local disk arrays, network-attached storage, distributed storage systems, or cloud provider object storage with S3 compatibility.
 
 **Consumers**:
 - Worker Service (write logs and large results >1MB)
@@ -474,13 +482,26 @@ artifact-staging/
 - Logs: 90 days
 - Staging: 1 day (cleanup after release)
 
-**Authentication**: IRSA for all access
+**Authentication**:
+- AWS S3: IRSA for platform services
+- S3-Compatible Storage: Access keys or other authentication mechanisms configured in platform secrets
+- All implementations: S3 signature v4 protocol support
 
-**Reference**: [Execution & Orchestration: S3 Storage](03-execution-orchestration.md#s3-storage)
+**Reference**: [Execution & Orchestration: S3 Storage](03-execution-orchestration.md#s3-storage), [Build & Distribution: Object Storage Contract](04-build-distribution.md#object-storage-contract)
 
 ##### Secrets Manager
 
 **Purpose**: Secure secret storage with rotation and audit logging
+
+**Port Contract**: External secret references materialized as Kubernetes Secrets
+
+**Adapter Implementations:**
+
+**AWS Secrets Manager (Production):** Currently implemented using External Secrets Operator. IRSA-based authentication, automatic rotation support, CloudWatch audit logging, and hierarchical path organization with environment prefixes.
+
+**External Secret Stores (On Premises):** Architecture supports integration with vault solutions or secret management systems providing dynamic secrets, versioning, path-based organization, and lease management through External Secrets Operator or equivalent synchronization mechanisms.
+
+**Native Kubernetes Secrets (On Premises):** Architecture supports direct secret management using Kubernetes native resources for deployments not requiring external secret stores.
 
 **Consumers**:
 - Worker Service (retrieves publisher credentials)
@@ -501,10 +522,13 @@ publishers/
 **Access Pattern**:
 - Secrets never resolved until point of use
 - Components receive only secret references
-- Resolution happens in worker pods with IRSA
+- Resolution happens in worker pods with IRSA (AWS) or ServiceAccount tokens (Vault/K8s)
 - Secrets exist in memory only during active use
 
-**Authentication**: IRSA policies scope access by prefix
+**Authentication**:
+- AWS Secrets Manager: IRSA policies scope access by prefix
+- Vault: Kubernetes authentication with role-based policies
+- Kubernetes Secrets: RBAC controls access
 
 **Reference**: [Core Architecture: Secret Management Patterns](01-core-architecture.md#secret-management-patterns)
 
@@ -599,9 +623,17 @@ See [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md
 
 #### OCI Registries
 
+**Port Contract**: OCI-compliant image registry for container images and OCI artifacts
+
 ##### Artifact Tracking Registry
 
 **Purpose**: Storage for artifact OCI tracking images
+
+**Adapter Implementations:**
+
+**Amazon ECR (Production):** Currently implemented. Managed container registry with IRSA authentication, automatic encryption, image scanning, lifecycle policies, and CloudWatch audit logging integration.
+
+**OCI-Compliant Registries (On Premises):** Architecture supports container registries implementing the OCI Distribution Specification. Implementations may provide enterprise features such as vulnerability scanning, content trust, replication, and support for multiple storage backends.
 
 **Consumers**:
 - Artifacts Component (pushes tracking images)
@@ -610,13 +642,23 @@ See [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md
 
 **Format**: `[tracking-registry]/[repository]/[project]/[artifact]:sha-[commit_sha]`
 
-**Authentication**: IRSA for workers, read-only for security tools
+**Authentication**:
+- AWS ECR: IRSA for platform workers, read-only IAM roles for security tools
+- OCI Registries: Service accounts, robot accounts, or token-based authentication with scoped permissions
 
-**Reference**: [Core Architecture: OCI Image Formats](01-core-architecture.md#artifact-oci-tracking-images)
+**Reference**: [Core Architecture: OCI Image Formats](01-core-architecture.md#artifact-oci-tracking-images), [Build & Distribution: Container Registry Contract](04-build-distribution.md#container-registry-contract)
 
 ##### Release Registry
 
 **Purpose**: Storage for Release OCI images
+
+**Adapter Implementations:**
+
+Uses the same registry adapters as artifact tracking, configured for release image storage:
+
+**Amazon ECR (Production):** Dedicated ECR repository for release images with lifecycle policies for retention management.
+
+**OCI-Compliant Registries (On Premises):** Dedicated registry project or namespace for release images. Implementations may support replication policies for high availability across multiple registry instances.
 
 **Consumers**:
 - Release Component (pushes release images)
@@ -624,7 +666,9 @@ See [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md
 
 **Format**: `[release-registry]/[repository]/[project]:[commit-sha]`
 
-**Authentication**: IRSA for platform, Argo CD service account for reads
+**Authentication**:
+- AWS ECR: IRSA for Release Component, Argo CD service account for reads
+- OCI Registries: Separate credentials for push (Release Component) and pull (Argo CD) operations with appropriate permissions
 
 **Reference**: [Core Architecture: OCI Image Formats](01-core-architecture.md#release-oci-images)
 
@@ -646,23 +690,34 @@ See [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md
 
 #### Observability Stack
 
-##### Grafana Cloud
+**Port Contract**: Metrics collection, log aggregation, and visualization
 
-**Purpose**: Unified metrics, logs, and dashboards
+**Purpose**: Unified metrics, logs, and dashboards across all platform components
+
+**Adapter Implementations:**
+
+The platform standardizes on Grafana Alloy for data collection with configurable output destinations:
+
+**Grafana Cloud (Production):** Currently implemented. Managed observability platform with Prometheus-compatible metrics, Loki log aggregation, and pre-built dashboards. Grafana Alloy ships metrics via `prometheus.remote_write` and logs via `loki.write` to cloud endpoints. Authentication via API keys, automatic retention management.
+
+**In-Cluster Stack (On Premises):** Architecture supported. Self-hosted Prometheus, Loki, and Grafana deployed within the cluster. Grafana Alloy configured with identical components but pointing to local service endpoints. Prometheus stores metrics with configurable retention (typically 15-30 days), Loki uses S3-compatible backend for log storage, Grafana provides unified visualization.
+
+**Hybrid Configuration (Optional):** Platform supports mixed configurations where metrics go to one destination and logs to another, or where multiple outputs receive data simultaneously for redundancy.
 
 **Data Sources**:
 - Prometheus metrics (scraped from platform components)
-- Loki logs (streamed via promtail)
-- CloudWatch metrics (polled via integration)
+- Container logs (collected via Kubernetes log APIs)
+- Optional: CloudWatch metrics (via AWS integration)
 
 **Consumers**: All platform components export metrics and logs
 
 **Integration**:
-- Metrics: Prometheus `/metrics` endpoints scraped every 15s
-- Logs: Promtail daemonset tails container logs
-- CloudWatch: Grafana Cloud polls AWS metrics every 60s
+- Grafana Alloy DaemonSet on all nodes
+- Automatic service discovery via Kubernetes annotations
+- Component-based configuration for scraping and forwarding
+- Consistent configuration structure across environments
 
-**Reference**: [Execution & Orchestration: Monitoring & Observability](03-execution-orchestration.md#monitoring--observability)
+**Reference**: [Execution & Orchestration: Monitoring & Observability](03-execution-orchestration.md#monitoring--observability), [Platform Infrastructure: Observability Architecture](09-platform-infrastructure.md#observability-architecture)
 
 ### Error Propagation Patterns
 

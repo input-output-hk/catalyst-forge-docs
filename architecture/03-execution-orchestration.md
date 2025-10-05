@@ -1008,6 +1008,40 @@ For authentication patterns, see [Core Architecture: Authentication & Authorizat
 - **Actions**: Pipeline trigger mechanism
 - **Repository Access**: SSH keys for cloning
 
+### Port Contracts
+
+#### Layer 7 Routing Contract
+
+The platform utilizes the Kubernetes Gateway API as the standard ingress contract. This contract provides a portable, expressive model for HTTP routing, traffic management, and policy enforcement.
+
+**Contract Specification:**
+- Applications define ingress requirements using Gateway API resources
+- Gateway implementations handle request routing, load balancing, and TLS termination
+- The contract supports advanced features including request matching, header manipulation, and traffic splitting
+
+**Adapter Implementation:**
+
+**Envoy Gateway:** Serves as the Gateway API implementation across all environments. Envoy Gateway achieved Gateway API GA status and provides consistent behavior whether deployed on AWS/EKS or on-premises Kubernetes. The implementation handles HTTP routing, WebSocket support, and TLS termination. Configuration remains identical across environments, with only infrastructure-level differences such as LoadBalancer service bindings varying by deployment context.
+
+#### DNS Management Contract
+
+Applications declare hostnames as part of their Network XRD specifications. The DNS contract ensures these declarations result in properly configured DNS records in the environment's DNS provider.
+
+**Contract Requirements:**
+
+An adapter for this port must provide:
+- Automatic DNS record creation from Kubernetes resource declarations
+- Synchronization of record lifecycle with application lifecycle (create, update, delete)
+- Support for both public and private DNS zones
+- Authentication mechanism appropriate to the DNS provider
+- Record cleanup on resource deletion to prevent stale entries
+
+**Adapter Implementations:**
+
+**ExternalDNS with Route53 (Production):** Currently implemented for AWS environments. Automatically synchronizes Gateway API and Service resources with Route53 hosted zones using IRSA authentication.
+
+**ExternalDNS with Alternative Providers (On Premises):** Architecture supports DNS providers including cloud-based services, RFC2136-compatible authoritative nameservers, and other DNS systems. Implementations maintain the same declarative model with provider-specific authentication and zone configuration.
+
 ### AWS Services Integration
 
 - **S3**: Logs and large result storage

@@ -214,6 +214,47 @@ The platform ships with publishers for the following registry types:
 
 Each publisher handles the specific protocols and requirements of its target registry type, including authentication methods, metadata formats, and validation rules.
 
+### Port Contracts
+
+#### Object Storage Contract
+
+The platform defines an object storage contract based on S3-compatible APIs. This contract enables artifact storage, log retention, and static file hosting using a consistent interface across different storage backends.
+
+**Contract Requirements:**
+
+An adapter for this port must provide:
+- S3-compatible API supporting PUT, GET, DELETE, and LIST operations
+- Presigned URL generation for time-limited access grants
+- Bucket-based organization with hierarchical object key paths
+- TLS-encrypted data transfer
+- Authentication mechanism (access keys, platform-native credentials, or token-based)
+- Lifecycle policies or equivalent mechanism for automatic object expiration
+
+**Adapter Implementations:**
+
+**Amazon S3 (Production):** Currently implemented. Provides managed object storage with IRSA-based authentication, lifecycle policies, and CloudWatch logging integration.
+
+**S3-Compatible Storage (On Premises):** Architecture supports object storage systems providing S3-compatible APIs. Implementations must support the core S3 operations and can utilize various backend storage including local disk arrays, network-attached storage, or distributed storage systems.
+
+#### Container Registry Contract
+
+The platform requires OCI-compliant container registries for artifact distribution. This contract enables container image push and pull operations while supporting image signing and vulnerability scanning integration.
+
+**Contract Requirements:**
+
+An adapter for this port must provide:
+- OCI Distribution Specification compliance for image push and pull
+- Support for multi-architecture images and manifest lists
+- Image tagging with both mutable tags and immutable digest references
+- Registry authentication compatible with Docker config.json format
+- Optional support for image signing verification and vulnerability scanning hooks
+
+**Adapter Implementations:**
+
+**Amazon ECR (Production):** Currently implemented. Provides managed container registry with IRSA authentication, automatic encryption, image scanning, and lifecycle policies.
+
+**OCI-Compliant Registries (On Premises):** Architecture supports container registries implementing the OCI Distribution Specification. Implementations may provide additional features such as vulnerability scanning, content trust, replication, and multiple storage backend options.
+
 ### Artifact Tracking OCI Format
 
 For complete OCI tracking image format specifications, see [Core Architecture: OCI Image Formats - Artifact OCI Tracking Images](01-core-architecture.md#artifact-oci-tracking-images).
