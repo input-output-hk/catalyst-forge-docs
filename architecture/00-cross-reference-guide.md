@@ -321,6 +321,10 @@ KRD generation involves multiple system components:
 | Infrastructure abstractions | [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog) |
 | Environment configuration | [Infrastructure Abstractions: Environment Configuration Model](08-infrastructure-abstractions.md#environment-configuration-model) |
 | Resource references | [Infrastructure Abstractions: Universal Reference Pattern](08-infrastructure-abstractions.md#universal-reference-pattern) |
+| Platform operators | [Platform Infrastructure: Foundational AWS Dependencies](09-platform-infrastructure.md#foundational-aws-dependencies) |
+| Network architecture | [Platform Infrastructure: Network Architecture Model](09-platform-infrastructure.md#network-architecture-model) |
+| Environment architecture | [Platform Infrastructure: Environment Architecture Model](09-platform-infrastructure.md#environment-architecture-model) |
+| Zero-trust networking | [Platform Infrastructure: Zero-Trust Networking Architecture](09-platform-infrastructure.md#zero-trust-networking-architecture) |
 | Component interactions | [Integration Contracts](07-integration-contracts.md) |
 | Entity definitions | [Domain Model & API Reference: Domain Entity Catalog](06-domain-model-api-reference.md#domain-entity-catalog) |
 | API specifications | [Domain Model & API Reference: API Specifications](06-domain-model-api-reference.md#api-specifications-by-domain) |

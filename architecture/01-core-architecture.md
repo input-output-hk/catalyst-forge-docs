@@ -14,7 +14,7 @@ Catalyst Forge is an opinionated internal developer platform that manages the co
 Catalyst Forge manages the complete SDLC from commit to deployment for a growing startup organization. The platform enforces conventions where consistency matters (build systems, deployment targets, configuration patterns) while providing flexibility where teams need it (tool selection within phases, deployment strategies, release cadences). This approach reduces cognitive load for common cases while maintaining escape hatches for complex requirements.
 
 **Scope**: Complete SDLC coverage for ~15-20 engineers with built-in capacity for growth
-**Infrastructure**: Kubernetes-native on AWS (cloud) and Hetzner (bare-metal)
+**Infrastructure**: Kubernetes-native on AWS with EKS. See [Platform Infrastructure](09-platform-infrastructure.md) for complete infrastructure architecture.
 
 #### What Catalyst Forge Is Not
 
@@ -271,6 +271,8 @@ via CLI         worker builds     Pools execute    Creates           ReleasePoin
 7. **NATS JetStream for messaging** - Cluster-local, replicated messaging providing work queues and request-reply patterns for ephemeral job coordination
 
 8. **PostgreSQL for persistence** - Reliable, well-understood relational database for audit trails and permanent state management (ephemeral job state handled by messaging layer)
+
+For complete infrastructure layer specifications including AWS dependencies, network topology, node management, and zero-trust networking, see [Platform Infrastructure](09-platform-infrastructure.md).
 
 #### Architectural Patterns
 
@@ -891,6 +893,13 @@ This document defines shared concepts that are consumed by all components. For s
 - Release component packages XRs alongside raw Kubernetes resources in Release OCI images
 - Crossplane composition functions apply environment-specific configuration during deployment
 - See [Infrastructure Abstractions](08-infrastructure-abstractions.md) for complete XRD catalog and patterns
+
+**Platform Infrastructure Layer**:
+- All platform services deploy to EKS with platform operators (External Secrets, External DNS, Envoy Gateway, Karpenter, KEDA, Istio)
+- Worker services use KEDA for autoscaling based on NATS JetStream consumer lag
+- Karpenter provides dynamic node provisioning for worker scaling
+- Zero-trust networking via Istio Ambient Mode secures all service communication
+- See [Platform Infrastructure](09-platform-infrastructure.md) for complete infrastructure specifications
 
 ## Reference
 

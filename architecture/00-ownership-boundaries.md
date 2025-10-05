@@ -180,6 +180,37 @@ This document defines clear ownership boundaries for each architectural document
 
 ---
 
+### 09-platform-infrastructure.md
+**Owner**: Platform Core Team
+
+**Owns**:
+- AWS infrastructure architecture and dependencies
+- EKS cluster design and platform operators catalog
+- Network topology (VPC, Transit Gateway, hub-and-spoke)
+- Node management strategy (Karpenter configuration and patterns)
+- Workload autoscaling architecture (KEDA integration)
+- Zero-trust networking implementation (Istio Ambient Mode)
+- Environment architecture and differentiation
+- Platform cluster composition and services
+- Security architecture (defense in depth layers)
+- Data persistence strategy (RDS, storage classes)
+- Cost optimization architectural decisions
+- Infrastructure scaling considerations
+
+**Does NOT Own**:
+- Application-level Kubernetes resource specifications (owned by Infrastructure Abstractions)
+- Platform services internal architecture (owned by respective component specs)
+- Secret management patterns at application level (owned by Core Architecture)
+- Deployment workflows and GitOps integration (owned by Release & Deployment)
+
+**References**:
+- Core Architecture for shared infrastructure patterns
+- Infrastructure Abstractions for XRD catalog and application resources
+- Execution & Orchestration for worker service deployment details
+- Integration Contracts for platform service interactions
+
+---
+
 ### 06-domain-model-api-reference.md
 **Owner**: Platform Core Team (Coordinating)
 

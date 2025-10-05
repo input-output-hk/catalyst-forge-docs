@@ -115,6 +115,9 @@ A persistent business object in the platform (e.g., PipelineRun, Release, Deploy
 ### Earthly
 Container-based build tool used as the default artifact producer. Provides reproducible builds with caching. See [Build & Distribution: Earthly Producer](04-build-distribution.md#earthly-producer).
 
+### EKS (Elastic Kubernetes Service)
+AWS managed Kubernetes control plane service. Foundation of the platform infrastructure. See [Platform Infrastructure: Foundational AWS Dependencies](09-platform-infrastructure.md#foundational-aws-dependencies).
+
 ### Environment
 A deployment target (dev, staging, production). Each has specific promotion policies. See [Release & Deployment: Environment Promotion](05-release-deployment.md#environment-promotion).
 
@@ -177,11 +180,20 @@ Cannot be modified after creation. Releases are immutable snapshots. See [Core A
 Defined interface for component-to-component communication. See [Integration Contracts](07-integration-contracts.md).
 
 ### IRSA (IAM Roles for Service Accounts)
-Kubernetes service accounts with AWS IAM roles for secure AWS service access without long-lived credentials. See [Core Architecture: Worker Pool Security](01-core-architecture.md#worker-pool-security).
+AWS mechanism for pod-level authentication to AWS services without static credentials. See [Platform Infrastructure: Foundational AWS Dependencies](09-platform-infrastructure.md#foundational-aws-dependencies).
+
+### Istio Ambient Mode
+Sidecar-less service mesh providing zero-trust networking with automatic mTLS. See [Platform Infrastructure: Zero-Trust Networking Architecture](09-platform-infrastructure.md#zero-trust-networking-architecture).
 
 ---
 
 ## K
+
+### Karpenter
+Kubernetes node provisioning operator that dynamically provisions nodes based on workload requirements. See [Platform Infrastructure: Node Management Architecture](09-platform-infrastructure.md#node-management-architecture).
+
+### KEDA (Kubernetes Event-Driven Autoscaling)
+Operator that scales workloads based on external metrics like NATS JetStream consumer lag. See [Platform Infrastructure: Workload Autoscaling Architecture](09-platform-infrastructure.md#workload-autoscaling-architecture).
 
 ### Keycloak
 Identity and access management system handling all platform authentication. All auth flows (GitHub OIDC, CLI, internal services) go through Keycloak. See [Core Architecture: Authentication & Authorization Model](01-core-architecture.md#authentication--authorization-model).
@@ -234,6 +246,9 @@ Platform component orchestrating all other components and managing execution. Se
 
 ### Pipeline Run
 Single execution of the CI/CD pipeline for a commit. See [Domain Model & API Reference: PipelineRun](06-domain-model-api-reference.md#pipelinerun).
+
+### Platform Cluster
+Dedicated EKS cluster hosting platform services (API Server, Workers, NATS, Argo CD). See [Platform Infrastructure: Platform Cluster](09-platform-infrastructure.md#platform-cluster).
 
 ### Pointer File
 ReleasePointer resource in GitOps repository that references a release by commit SHA. See [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
@@ -384,6 +399,8 @@ Domain entity tracking execution of all steps for a project within a phase. See 
 ### Tracking Image
 See **Artifact OCI Tracking Image**.
 
+### Transit Gateway
+AWS networking service enabling hub-and-spoke topology with centralized routing. See [Platform Infrastructure: Hub-and-Spoke Topology](09-platform-infrastructure.md#hub-and-spoke-topology).
 
 ---
 
@@ -432,6 +449,13 @@ Schema defining a Crossplane Composite Resource type. Platform provides XRDs for
 | URI | Uniform Resource Identifier | Resource address |
 | XR | Composite Resource | Crossplane abstraction |
 | XRD | Composite Resource Definition | Crossplane schema |
+
+---
+
+## Z
+
+### Zero-Trust Networking
+Security model requiring authentication for all service-to-service communication with default-deny policies. Implemented via Istio Ambient Mode. See [Platform Infrastructure: Zero-Trust Networking Architecture](09-platform-infrastructure.md#zero-trust-networking-architecture).
 
 ---
 

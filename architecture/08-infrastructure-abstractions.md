@@ -25,6 +25,8 @@ The platform operates on AWS EKS with these key operators:
 - EBS CSI Driver (persistent volumes)
 - IRSA (pod-level AWS authentication)
 
+For complete platform infrastructure specifications including network architecture, security model, and environment design, see [Platform Infrastructure](09-platform-infrastructure.md).
+
 ### Reference Resolution Model
 
 The platform provides a universal reference pattern that works consistently across environment variables and volume mounts. This model addresses a fundamental question in infrastructure abstraction: when should values be inlined versus referenced?

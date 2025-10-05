@@ -57,6 +57,8 @@ The Pipeline Component consists of four primary subsystems:
 - Consumes jobs from NATS JetStream pull consumers
 - Reports status via request-reply pattern to dispatcher
 
+For infrastructure-level scaling architecture (KEDA configuration, Karpenter provisioning, node management), see [Platform Infrastructure: Workload Autoscaling Architecture](09-platform-infrastructure.md#workload-autoscaling-architecture).
+
 **NATS Infrastructure**
 - JetStream: Distributes jobs to worker service via work queues
 - Request-reply: Workers respond directly to dispatcher inboxes

@@ -69,6 +69,28 @@ Defines the Crossplane-based infrastructure abstractions for platform deployment
 - Working with environment-specific configuration
 - Designing new infrastructure abstractions
 
+#### [09-platform-infrastructure.md](09-platform-infrastructure.md)
+**Owner**: Platform Core
+
+Defines the AWS-based infrastructure architecture for the platform.
+
+**Key Topics**:
+- Hub-and-spoke network topology with Transit Gateway
+- EKS cluster architecture and platform operators
+- Node management with Karpenter (dynamic provisioning, spot instances)
+- Workload autoscaling with KEDA (event-driven scaling)
+- Zero-trust networking with Istio Ambient Mode
+- Environment architecture and platform cluster design
+- Security architecture (defense in depth, secret hierarchy)
+- Cost optimization strategies
+
+**Read this when**:
+- Understanding platform infrastructure and AWS dependencies
+- Configuring environments or the platform cluster
+- Working with network architecture or security policies
+- Optimizing costs or scaling strategies
+- Planning infrastructure changes
+
 ---
 
 ### Component Specifications
@@ -204,13 +226,15 @@ Defines all component interactions and integration patterns.
 3. [Execution & Orchestration](03-execution-orchestration.md) - Understand pipeline execution
 4. [Infrastructure Abstractions](08-infrastructure-abstractions.md) - Learn deployment abstractions
 5. [Domain Model & API Reference](06-domain-model-api-reference.md) - Learn the domain model
+6. [Platform Infrastructure](09-platform-infrastructure.md) - Understand infrastructure layer
 
 #### Platform Operator
 **Recommended Reading Order**:
-1. [Core Architecture](01-core-architecture.md) - Understand shared infrastructure
-2. [Execution & Orchestration](03-execution-orchestration.md) - Operational aspects
-3. [Integration Contracts](07-integration-contracts.md) - Component interactions
-4. [Release & Deployment](05-release-deployment.md) - Deployment workflows
+1. [Platform Infrastructure](09-platform-infrastructure.md) - Infrastructure architecture
+2. [Core Architecture](01-core-architecture.md) - Understand shared infrastructure
+3. [Execution & Orchestration](03-execution-orchestration.md) - Operational aspects
+4. [Integration Contracts](07-integration-contracts.md) - Component interactions
+5. [Release & Deployment](05-release-deployment.md) - Deployment workflows
 
 #### Component Developer
 **Recommended Reading Order**:
@@ -273,6 +297,10 @@ Defines all component interactions and integration patterns.
 | Artifact Publishing | [Build & Distribution: Publisher Contract](04-build-distribution.md#publisher-contract--registry-types) |
 | Release Process | [Release & Deployment: Release Creation Workflow](05-release-deployment.md#release-creation-workflow) |
 | Infrastructure Abstractions | [Infrastructure Abstractions: XRD Catalog](08-infrastructure-abstractions.md#xrd-catalog) |
+| Platform Infrastructure | [Platform Infrastructure: Infrastructure Architecture](09-platform-infrastructure.md#infrastructure-architecture) |
+| Network Architecture | [Platform Infrastructure: Network Architecture Model](09-platform-infrastructure.md#network-architecture-model) |
+| Node Management | [Platform Infrastructure: Node Management Architecture](09-platform-infrastructure.md#node-management-architecture) |
+| Zero-Trust Networking | [Platform Infrastructure: Zero-Trust Networking Architecture](09-platform-infrastructure.md#zero-trust-networking-architecture) |
 | Domain Entities | [Domain Model & API Reference: Domain Entity Catalog](06-domain-model-api-reference.md#domain-entity-catalog) |
 | Component Interactions | [Integration Contracts](07-integration-contracts.md) |
 
