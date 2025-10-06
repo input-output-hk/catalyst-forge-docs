@@ -368,8 +368,7 @@ The platform processes work through well-defined flows from commit to deployment
 5. Operator Reconciliation
    External Secrets Operator → Sync secrets from providers
    External DNS → Create DNS records
-   Envoy Gateway → Configure ingress routes
-   Istio Ambient → Apply service mesh policies
+   Istio → Configure ingress routes (Gateway API) and service mesh policies
 ```
 
 ### Shared Concepts

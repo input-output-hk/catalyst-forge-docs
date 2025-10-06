@@ -206,12 +206,11 @@ The platform requires several Kubernetes operators for functionality. These oper
 **Universal Operators (both profiles):**
 - External DNS (DNS record synchronization)
 - External Secrets Operator (secret synchronization)
-- Envoy Gateway (ingress and traffic management)
+- Istio Ambient Mode (ingress via Gateway API and zero-trust service mesh)
 - cert-manager (TLS certificate lifecycle)
 - Argo CD (GitOps continuous delivery)
 - Crossplane (infrastructure abstraction)
 - KEDA (workload autoscaling)
-- Istio Ambient Mode (zero-trust networking)
 
 **AWS-Specific Operators (production profile):**
 - AWS Load Balancer Controller (ELB/ALB/NLB provisioning)

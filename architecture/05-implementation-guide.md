@@ -284,9 +284,9 @@ See Platform Contracts for complete contract specifications. This section define
 - Automated backups and point-in-time recovery
 - Connection credentials via External Secrets
 
-**Network (with Service Mesh): Envoy Gateway + Istio Ambient**
-- Envoy Gateway for ingress (Gateway API implementation)
-- Istio Ambient Mode for service mesh
+**Network (with Service Mesh): Istio Ambient Mode**
+- Unified ingress and service mesh via Istio
+- Implements Kubernetes Gateway API for ingress
 - Automatic mTLS for all cluster traffic
 - Service-to-service authorization policies
 
@@ -387,10 +387,10 @@ The On-Premises profile uses self-hosted, open-source implementations for all in
 - High availability via streaming replication
 - Connection credentials via Kubernetes Secrets
 
-**Network (with Service Mesh): Envoy Gateway + Istio Ambient**
+**Network (with Service Mesh): Istio Ambient Mode**
 - Identical to AWS profile
-- Envoy Gateway for ingress
-- Istio Ambient Mode for service mesh
+- Unified ingress and service mesh via Istio
+- Implements Kubernetes Gateway API for ingress
 
 ### External Requirements
 

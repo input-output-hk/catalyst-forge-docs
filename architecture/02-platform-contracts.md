@@ -100,7 +100,7 @@ The platform defines 11 infrastructure contracts:
 | Authentication                  | Platform-Provided     | Keycloak                          | Keycloak                             |
 | Workload Scaling                | Platform-Provided     | KEDA + Karpenter                  | KEDA + cluster autoscaler            |
 | **Database**                    | **Platform-Provided** | **Amazon RDS**                    | **CloudNativePG**                    |
-| **Network (with Service Mesh)** | **Platform-Provided** | **Envoy Gateway + Istio Ambient** | **Envoy Gateway + Istio Ambient**    |
+| **Network (with Service Mesh)** | **Platform-Provided** | **Istio Ambient Mode**            | **Istio Ambient Mode**               |
 
 ---
 
@@ -583,13 +583,15 @@ The platform defines 11 infrastructure contracts:
 
 **Adapter Implementations**:
 
-**Envoy Gateway + Istio Ambient Mode (Both Profiles)**:
+**Istio Ambient Mode (Both Profiles)**:
 - Same implementation for AWS and on-premises
-- **Envoy Gateway**: North-south traffic (external → cluster)
-  - Implements Kubernetes Gateway API
+- Unified traffic management for both north-south and east-west traffic
+- **Ingress (North-South Traffic)**:
+  - Implements Kubernetes Gateway API for external → cluster traffic
   - TLS termination with cert-manager integration
   - Rate limiting and request authentication
-- **Istio Ambient Mode**: East-west traffic (service → service)
+  - Load balancing and routing
+- **Service Mesh (East-West Traffic)**:
   - Sidecar-less service mesh (ztunnel for L4, waypoint for L7)
   - Automatic mTLS between services
   - Service-to-service authorization via AuthorizationPolicy
@@ -606,7 +608,7 @@ Applications configure both ingress and service mesh policies through a single N
 - `authorizationPolicies`: List of allowed source services/namespaces
 - `trafficPolicy`: Retry, timeout, circuit breaker configuration
 
-Istio Ambient Mode deploys platform-wide. Applications configure policies through the Network XRD while the service mesh provides automatic encryption and traffic management.
+Istio Ambient Mode deploys platform-wide. Applications configure policies through the Network XRD while Istio provides automatic encryption and traffic management for all cluster traffic.
 
 ---
 

@@ -207,7 +207,7 @@ Platform contract defining work queue and request-reply messaging requirements. 
 Messaging system providing ephemeral work queues and request-reply patterns for platform job distribution. See Architecture Overview: Technology Stack.
 
 ### Network Contract
-Platform contract defining service exposure, DNS, and service mesh policy requirements. See Platform Contracts: Network Contract.
+Platform contract defining service exposure, DNS, ingress via Gateway API, and service mesh policy requirements. Fulfilled by Istio Ambient Mode for both north-south and east-west traffic. See Platform Contracts: Network Contract.
 
 ---
 
