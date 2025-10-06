@@ -1,40 +1,58 @@
 # Glossary of Terms
 
+## Table of Contents
+
+- [A](#a)
+- [B](#b)
+- [C](#c)
+- [D](#d)
+- [E](#e)
+- [F](#f)
+- [G](#g)
+- [I](#i)
+- [J](#j)
+- [K](#k)
+- [M](#m)
+- [N](#n)
+- [O](#o)
+- [P](#p)
+- [R](#r)
+- [S](#s)
+- [T](#t)
+- [W](#w)
+- [X](#x)
+
+---
+
 This glossary provides definitions for key terms and concepts used throughout the Catalyst Forge platform documentation.
 
 ---
 
 ## A
 
-### Alias
-Human-readable identifiers for releases, including numeric (auto-incrementing), tag (from Git tags), and branch aliases. See [Release & Deployment: Release Identification & Aliasing](05-release-deployment.md#release-identification--aliasing).
+### Adapter
+A concrete implementation of a platform contract (port). Adapters fulfill contract requirements using specific technologies (e.g., S3 adapter for Object Storage Contract, MinIO adapter for Object Storage Contract). See Platform Contracts.
 
-### API Server
-REST API component responsible for pipeline management, state persistence, and authentication. Part of the Pipeline Component. See [Execution & Orchestration: Pipeline Architecture](03-execution-orchestration.md#pipeline-architecture).
+### Alias
+Human-readable identifiers for releases, including numeric (auto-incrementing), tag (from Git tags), and branch aliases. See Domain Model: Release.
 
 ### Approval
-Required authorization for deploying releases to protected environments (typically production). See [Domain Model & API Reference: ReleaseApproval](06-domain-model-api-reference.md#releaseapproval).
+Required authorization for deploying releases to protected environments (typically production). See Domain Model: ReleaseApproval.
 
 ### Argo CD
-GitOps continuous delivery tool used for deploying releases to Kubernetes clusters. See [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
+GitOps continuous delivery tool used for deploying releases to Kubernetes clusters. See System Architecture: GitOps Deployment Flow.
 
 ### Argo Workflows
-Kubernetes-native workflow orchestration engine used for pipeline execution. See [Execution & Orchestration: Argo Workflows Engine](03-execution-orchestration.md#argo-workflows-engine).
+Kubernetes-native workflow orchestration engine used for pipeline execution. See System Architecture: Component Architecture.
 
 ### Artifact
-A build output (container image, binary, or archive) produced during pipeline execution. See [Build & Distribution: Artifact Types & Definitions](04-build-distribution.md#artifact-types--definitions).
+A build output (container image, binary, or archive) produced during pipeline execution. See Developer Guide: Artifact Configuration.
 
 ### Artifact OCI Tracking Image
-An OCI image containing metadata, SBOM, and provenance for a built artifact. Format: `[tracking-registry]/[repository]/[project]/[artifact]:sha-[commit_sha]`. See [Core Architecture: OCI Image Formats](01-core-architecture.md#artifact-oci-tracking-images).
+An OCI image containing metadata, SBOM, and provenance for a built artifact. Format: `[tracking-registry]/[repository]/[project]/[artifact]:sha-[commit_sha]`. See System Architecture: OCI Image Formats.
 
-### Artifacts Component
-Platform component responsible for building and publishing artifacts. See [Build & Distribution](04-build-distribution.md).
-
-### Authentication Boundary
-Point where authentication is required for system access. Platform supports GitHub OIDC, CLI (via Keycloak), worker pools (IRSA), and internal services (Keycloak service accounts). See [Core Architecture: Authentication & Authorization Model](01-core-architecture.md#authentication--authorization-model).
-
-### AWS Secrets Manager
-Secret storage service used as the initial secret provider for the platform. See [Core Architecture: Secret Management Patterns](01-core-architecture.md#secret-providers).
+### Authentication Contract
+Platform contract defining identity verification and OIDC federation requirements. See Platform Contracts: Authentication Contract.
 
 ---
 
@@ -46,417 +64,284 @@ The foundation container image used to build a derived container image. Tracked 
 ### Branch Alias
 Release alias derived from branch name, format: `{branch-name}-{release-number}`. Example: `main-42`.
 
+### Bootstrapping
+The five-phase process of deploying the platform: Prerequisites, GitOps Foundation, Infrastructure Abstraction Layer, Platform Services, and Environment Provisioning. See Implementation Guide: Bootstrapping Sequence.
+
 ---
 
 ## C
 
 ### Canonical Identifier
-The authoritative unique identifier for a release: `{repository}/{project}/{commit-sha}`. See [Release & Deployment: Canonical Identity](05-release-deployment.md#canonical-identity).
+The immutable triplet `repository/project/commit-sha` that uniquely identifies releases and artifacts. See Architecture Overview: Canonical Identifier Pattern.
 
-### Canonical Triplet
-The pattern `repository/project/commit-sha` used throughout the platform for global uniqueness. See [Core Architecture: Key Terms](01-core-architecture.md#key-terms).
+### Cluster Provisioning Contract
+Platform contract defining Kubernetes cluster lifecycle management requirements. See Platform Contracts: Cluster Provisioning Contract.
 
-### CI Phase
-A named stage in the pipeline execution (e.g., test, build, release). Phases execute sequentially by group. See [Configuration & Discovery: Phase Definitions](02-configuration-discovery.md#repository-configuration-schema).
+### Composition
+Crossplane resource that implements an XRD by creating concrete Kubernetes resources. See Implementation Guide: Infrastructure Abstractions.
 
-### CMP (Custom Management Plugin)
-Argo CD plugin that extracts Kubernetes resources from Release OCI images. See [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
+### Container Registry Contract
+Platform contract defining OCI-compliant image storage requirements. See Platform Contracts: Container Registry Contract.
 
-### Commit SHA
-The Git commit hash that uniquely identifies source code state. Used as canonical identifier for releases.
+### Contract
+A platform port specification defining required capabilities, interface specifications, and behavioral requirements independent of implementation. See Platform Contracts.
 
-### Component
-A major subsystem of the platform: Pipeline, Project, Artifacts, or Release & Deployment. See [Core Architecture: Component Architecture & Dependencies](01-core-architecture.md#component-architecture--dependencies).
+### Control Plane
+The platform cluster that hosts platform services and manages environment clusters. See Implementation Guide: Control Plane / Data Plane Separation.
 
-### Composite Resource (XR)
-A Crossplane abstraction that simplifies Kubernetes resource provisioning. Projects primarily use XRs for deployment. See [Core Architecture: Technology Stack](01-core-architecture.md#core-technologies).
-
-### Configuration & Discovery
-Platform component defining CUE schemas and project discovery mechanisms. See [Configuration & Discovery](02-configuration-discovery.md).
-
-### Cosign
-Tool used for signing OCI images to provide cryptographic attestation. Used for artifact tracking images.
+### CronJob XRD
+Crossplane composite resource for scheduled task execution. See Implementation Guide: Infrastructure Abstractions.
 
 ### Crossplane
-CNCF tool for resource composition and infrastructure provisioning. Provides XRs for abstracting Kubernetes complexity. See [Core Architecture: Technology Stack](01-core-architecture.md#core-technologies).
+Kubernetes extension for infrastructure abstraction through composite resources (XRDs). See Architecture Overview: Technology Stack.
 
 ### CUE
-Configuration language used for all platform configuration. Provides type-safety and validation. See [Configuration & Discovery: CUE Configuration System](02-configuration-discovery.md#cue-configuration-system).
+Configuration language used for type-safe, composable platform configuration. See Developer Guide: Configuration with CUE.
 
 ---
 
 ## D
 
-### DAG (Directed Acyclic Graph)
-The execution graph constructed from phase and step configurations. Steps within a phase run in parallel unless prioritized.
+### Data Plane
+Environment clusters that execute application workloads. See Implementation Guide: Control Plane / Data Plane Separation.
+
+### Database Contract
+Platform contract defining relational database provisioning requirements. See Platform Contracts: Database Contract.
 
 ### Deployment
-The application of a release to a specific environment. Tracked as a database entity. See [Domain Model & API Reference: Deployment](06-domain-model-api-reference.md#deployment).
+An instance of a release running in a specific environment. See Domain Model: Deployment.
 
-### Discovery
-The process of traversing repository filesystem to find projects with `.forge` directories. See [Configuration & Discovery: Discovery Mechanisms & Rules](02-configuration-discovery.md#discovery-mechanisms--rules).
+### Deployment Profile
+Configuration set defining adapter implementations for all platform contracts (Production/AWS or On-Premises). See Implementation Guide: Deployment Profiles.
 
-### Discovery Output
-JSON structure containing repository config, discovered projects, and phase groups. Used to drive pipeline execution. See [Configuration & Discovery: Discovery Output](02-configuration-discovery.md#discovery-output).
-
-### Discovery Worker Pool
-Hot worker pool optimized for repository discovery with cached Git repositories. See [Execution & Orchestration: Hot Discovery Pool](03-execution-orchestration.md#hot-discovery-pool).
+### Deployment XRD
+Crossplane composite resource for stateless service deployment. See Implementation Guide: Infrastructure Abstractions.
 
 ### Dispatcher
-Lightweight pod that publishes jobs to NATS with reply subjects and awaits direct replies from workers. Part of Argo Workflows execution. See [Execution & Orchestration: Dispatcher Templates](03-execution-orchestration.md#dispatcher-templates).
+Ephemeral pods created by Argo Workflows that submit jobs to NATS JetStream and await replies. See System Architecture: Service Architecture.
 
-### Domain Entity
-A persistent business object in the platform (e.g., PipelineRun, Release, Deployment). See [Domain Model & API Reference: Domain Entity Catalog](06-domain-model-api-reference.md#domain-entity-catalog).
+### DNS Management Contract
+Platform contract defining DNS record lifecycle management requirements. See Platform Contracts: DNS Management Contract.
 
 ---
 
 ## E
 
 ### Earthly
-Container-based build tool used as the default artifact producer. Provides reproducible builds with caching. See [Build & Distribution: Earthly Producer](04-build-distribution.md#earthly-producer).
-
-### EKS (Elastic Kubernetes Service)
-AWS managed Kubernetes control plane service. Foundation of the platform infrastructure. See [Platform Infrastructure: Foundational AWS Dependencies](09-platform-infrastructure.md#foundational-aws-dependencies).
+Build tool used for all pipeline step execution. See Developer Guide: Earthly Integration.
 
 ### Environment
-A deployment target (dev, staging, production). Each has specific promotion policies. See [Release & Deployment: Environment Promotion](05-release-deployment.md#environment-promotion).
+A Kubernetes cluster running application workloads (dev, staging, production). See Architecture Overview: Core Concepts.
 
-### Environment Agnostic
-Design principle where releases contain no environment-specific configuration. EnvironmentConfigs provide values during deployment. See [Core Architecture: Environment Agnosticism](01-core-architecture.md#environment-agnosticism).
+### Environment Cluster
+A Kubernetes cluster that executes application workloads, managed by the platform cluster. See Implementation Guide: Environment Clusters.
 
 ### EnvironmentConfig
-Crossplane resource that provides environment-specific values to Composite Resources during deployment.
+Crossplane resource providing environment-specific configuration values at deployment time. See Implementation Guide: Environment Configuration Model.
 
-### Execution & Orchestration
-Platform component managing pipeline execution via Argo Workflows and worker pools. See [Execution & Orchestration](03-execution-orchestration.md).
+### Environment-Agnostic Release
+Release containing no environment-specific values, enabling deployment to any environment through EnvironmentConfig. See Architecture Overview: Environment Agnosticism.
+
+### External Secrets Operator
+Kubernetes operator that synchronizes secrets from external providers (AWS Secrets Manager, Vault) to Kubernetes Secrets. See Platform Contracts: Secret Management Contract.
 
 ---
 
 ## F
 
 ### Fail-Fast
-Execution principle where any failure immediately terminates the pipeline. See [Core Architecture: Sequential Phase Execution](01-core-architecture.md#sequential-phase-execution-with-fail-fast).
-
-### Forge Version
-Semantic version specified in `repo.cue` that applies to configuration schemas. Example: `v1.0.0`. See [Configuration & Discovery: Schema Versioning](02-configuration-discovery.md#schema-versioning--evolution).
+Pipeline execution model where any phase failure immediately terminates the pipeline. See Developer Guide: Pipeline Workflow.
 
 ---
 
 ## G
 
-### Git Worktree
-Lightweight checkout of a specific commit used by discovery workers for concurrent operations. See [Execution & Orchestration: Repository Caching](03-execution-orchestration.md#worker-execution-patterns).
-
-### GitHub OIDC
-OpenID Connect tokens from GitHub Actions, exchanged for Keycloak identity for API authentication. See [Core Architecture: Authentication Boundaries](01-core-architecture.md#authentication-boundaries).
+### Git SHA
+The commit identifier used as the immutable version component in canonical identifiers. See Architecture Overview: Canonical Identifier Pattern.
 
 ### GitOps
-Declarative deployment approach using Git as source of truth. Platform uses pointer files in GitOps repository. See [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
+Deployment model using Git as single source of truth for declarative infrastructure and applications. See System Architecture: GitOps Deployment Flow.
 
 ### GitOps Repository
-Central Git repository containing pointer files for all environments and projects. Structure: `environments/{env}/{repo}/{project}/release.yaml`.
-
-### Grafana Cloud
-Unified observability platform for metrics, logs, and dashboards. See [Execution & Orchestration: Monitoring & Observability](03-execution-orchestration.md#monitoring--observability).
-
----
-
-## H
-
-### Hot Worker Pool
-Persistent pods with cached repositories and warm connections to eliminate cold start penalties. See [Execution & Orchestration: Worker Pool Architecture](03-execution-orchestration.md#worker-pool-architecture).
+Git repository managed by the platform containing ReleasePointer resources for all environments. See System Architecture: GitOps Repository Structure.
 
 ---
 
 ## I
 
-### Idempotency
-Property where repeated operations with same inputs produce same outputs. Release creation and artifact publishing are idempotent. See [Build & Distribution: Idempotent Operations](04-build-distribution.md#idempotent-operations).
-
-### Immutable
-Cannot be modified after creation. Releases are immutable snapshots. See [Core Architecture: Immutability](01-core-architecture.md#immutability).
-
-### Integration Contract
-Defined interface for component-to-component communication. See [Integration Contracts](07-integration-contracts.md).
+### Immutability
+Architectural principle ensuring releases cannot be modified once created, only superseded or redeployed. See Architecture Overview: Immutability.
 
 ### IRSA (IAM Roles for Service Accounts)
-AWS mechanism for pod-level authentication to AWS services without static credentials. See [Platform Infrastructure: Foundational AWS Dependencies](09-platform-infrastructure.md#foundational-aws-dependencies).
+AWS mechanism for pod-level AWS service authentication without long-lived credentials (AWS profile only). See Platform Contracts: Authentication Contract.
 
-### Istio Ambient Mode
-Sidecar-less service mesh providing zero-trust networking with automatic mTLS. See [Platform Infrastructure: Zero-Trust Networking Architecture](09-platform-infrastructure.md#zero-trust-networking-architecture).
+---
+
+## J
+
+### Job XRD
+Crossplane composite resource for one-time task execution. See Implementation Guide: Infrastructure Abstractions.
 
 ---
 
 ## K
 
-### Karpenter
-Kubernetes node provisioning operator that dynamically provisions nodes based on workload requirements. See [Platform Infrastructure: Node Management Architecture](09-platform-infrastructure.md#node-management-architecture).
-
-### KEDA (Kubernetes Event-Driven Autoscaling)
-Operator that scales workloads based on external metrics like NATS JetStream consumer lag. See [Platform Infrastructure: Workload Autoscaling Architecture](09-platform-infrastructure.md#workload-autoscaling-architecture).
+### KEDA
+Kubernetes Event-Driven Autoscaling, used for pod-level autoscaling based on metrics. See Platform Contracts: Workload Scaling Contract.
 
 ### Keycloak
-Identity and access management system handling all platform authentication. All auth flows (GitHub OIDC, CLI, internal services) go through Keycloak. See [Core Architecture: Authentication & Authorization Model](01-core-architecture.md#authentication--authorization-model).
-
-### KRD (Kubernetes Resource Definition)
-YAML manifest defining Kubernetes resources. Generated from CUE during release creation. See [Core Architecture: Key Terms](01-core-architecture.md#key-terms).
-
----
-
-## L
-
-### Loki
-Log aggregation system that streams logs to Grafana Cloud. See [Execution & Orchestration: Logging](03-execution-orchestration.md#logging).
+Identity and access management system providing authentication for all platform access. See Architecture Overview: Technology Stack.
 
 ---
 
 ## M
 
-### Metadata Layer
-Layer in OCI images containing structured metadata. Both artifact tracking and release images have metadata layers. See [Core Architecture: OCI Image Formats](01-core-architecture.md#oci-image-formats).
+### Message Queue Contract
+Platform contract defining work queue and request-reply messaging requirements. See Platform Contracts: Message Queue Contract.
 
-### Monorepo Strategy
-Tagging strategy where tags follow `{project}/v*` pattern for individual project releases. See [Configuration & Discovery: Tagging Strategy](02-configuration-discovery.md#repository-configuration-schema).
+---
+
+## N
+
+### NATS JetStream
+Messaging system providing ephemeral work queues and request-reply patterns for platform job distribution. See Architecture Overview: Technology Stack.
+
+### Network Contract
+Platform contract defining service exposure, DNS, and service mesh policy requirements. See Platform Contracts: Network Contract.
 
 ---
 
 ## O
 
-### OCI (Open Container Initiative)
-Standard for container images and registries. Platform uses OCI format for both artifact tracking and release packaging. See [Core Architecture: OCI Image Formats](01-core-architecture.md#oci-image-formats).
+### Object Storage Contract
+Platform contract defining S3-compatible object storage requirements. See Platform Contracts: Object Storage Contract.
 
-### OCI Registry
-Storage for OCI images. Platform uses separate registries for artifact tracking and releases. See [Integration Contracts: OCI Registries](07-integration-contracts.md#oci-registries).
+### Observability Contract
+Platform contract defining metrics, logs, and traces collection requirements. See Platform Contracts: Observability Contract.
+
+### OCI (Open Container Initiative)
+Standards for container formats and registries. The platform uses OCI images for both artifacts and releases. See System Architecture: OCI Image Formats.
+
+### On-Premises Profile
+Deployment profile using self-hosted, open-source adapter implementations for all infrastructure contracts. See Implementation Guide: On-Premises Profile.
 
 ---
 
 ## P
 
 ### Phase
-Named stage in pipeline execution (e.g., test, build). Phases are grouped and execute sequentially by group. See [Configuration & Discovery: Phase Definitions](02-configuration-discovery.md#repository-configuration-schema).
+A sequential execution group in a pipeline, containing one or more tasks that execute in parallel. See Developer Guide: Pipeline Configuration.
 
-### Phase Group
-Numeric grouping that determines execution order. All phases in same group run in parallel. See [Execution & Orchestration: Phase & Step Execution](03-execution-orchestration.md#phase--step-execution).
-
-### PhaseExecution
-Domain entity tracking execution of a single phase within a pipeline run. See [Domain Model & API Reference: PhaseExecution](06-domain-model-api-reference.md#phaseexecution).
+### Phase Execution
+Entity representing execution of a specific phase within a pipeline run. See Domain Model: PhaseExecution.
 
 ### Pipeline Component
-Platform component orchestrating all other components and managing execution. See [Core Architecture: Component Architecture](01-core-architecture.md#pipeline-component).
+Logical component responsible for project discovery, CI orchestration, and build execution. See Architecture Overview: Component Architecture.
 
 ### Pipeline Run
-Single execution of the CI/CD pipeline for a commit. See [Domain Model & API Reference: PipelineRun](06-domain-model-api-reference.md#pipelinerun).
+Entity representing execution of a complete pipeline for a commit. See Domain Model: PipelineRun.
+
+### Platform API
+REST API service handling authentication, entity management, and webhook ingestion. See System Architecture: Service Architecture.
 
 ### Platform Cluster
-Dedicated EKS cluster hosting platform services (API Server, Workers, NATS, Argo CD). See [Platform Infrastructure: Platform Cluster](09-platform-infrastructure.md#platform-cluster).
+The persistent Kubernetes cluster hosting platform services and managing environment clusters. See Implementation Guide: Platform Cluster.
 
-### Pointer File
-ReleasePointer resource in GitOps repository that references a release by commit SHA. See [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
+### Platform-Provided Contract
+Infrastructure contract fulfilled by adapters deployed by the platform. See Platform Contracts: Contract Classification.
 
-### Ports and Adapters
-Architectural pattern enabling technology swapping without changing core workflows. Used for secret providers. See [Core Architecture: Built for Change](01-core-architecture.md#built-for-change-not-forever).
+### Port
+See Contract.
+
+### Ports and Adapters Pattern
+Architectural pattern separating interface specifications (ports/contracts) from implementations (adapters), enabling infrastructure portability. See Architecture Overview: Ports and Adapters Architecture.
 
 ### PostgreSQL
-Relational database for persistent storage of audit trails and queryable state. See [Domain Model & API Reference: Database Technology](06-domain-model-api-reference.md#database-technology).
+Relational database used for all platform persistent state and audit trails. See Architecture Overview: Technology Stack.
 
 ### Producer
-Component that builds artifacts from source code. Initial implementation: Earthly. See [Build & Distribution: Producer Contract](04-build-distribution.md#producer-contract--implementations).
+Configuration defining how an artifact is created (e.g., Earthly target specification). See Developer Guide: Artifact Configuration.
 
-### Progressive Disclosure
-Design principle supporting both quick reference and deep dives. See [Core Architecture: Progressive Disclosure of Complexity](01-core-architecture.md#progressive-disclosure-of-complexity).
+### Production/AWS Profile
+Deployment profile using AWS-managed services where appropriate and self-hosted services for platform-specific functionality. See Implementation Guide: Production/AWS Profile.
 
 ### Project
-A deliverable unit marked by a `.forge` folder. Unique within repository, not globally. See [Core Architecture: Key Terms](01-core-architecture.md#key-terms).
-
-### Project Component
-Platform component defining configuration schema and discovery mechanisms. See [Core Architecture: Component Architecture](01-core-architecture.md#project-component).
-
-### Prometheus
-Metrics collection system that scrapes platform components and pushes to Grafana Cloud. See [Execution & Orchestration: Metrics Collection](03-execution-orchestration.md#metrics-collection).
-
-### Provenance
-Traceable record of artifact origin, build process, and materials. Stored in artifact tracking OCI images. See [Build & Distribution: Universal Provenance](04-build-distribution.md#universal-provenance).
+A deliverable unit within a repository, identified by a `.forge` directory. Projects are identified globally by `repository/project-name`. See Developer Guide: Repository and Project Structure.
 
 ### Publisher
-Component that distributes built artifacts to registries (Docker, PyPI, GitHub, etc.). See [Build & Distribution: Publisher Contract](04-build-distribution.md#publisher-contract--registry-types).
+Configuration defining where artifacts are distributed (Docker registries, GitHub Releases, PyPI, etc.). See Developer Guide: Publisher Configuration.
 
 ---
 
 ## R
 
-### RBAC (Role-Based Access Control)
-Authorization model using roles to control permissions. Managed in Keycloak for all platform access. See [Core Architecture: Authorization Model](01-core-architecture.md#authorization-model).
+### Reference Resolution
+Pattern for accessing values from other XRDs using syntax like `outputs/<xr>/<key>`, `connections/<xr>/<key>`, `secrets/<xr>/<secret>/[key]`. See Implementation Guide: Reference Resolution Pattern.
 
 ### Release
-Immutable snapshot of a project at a specific commit, including KRDs and artifact references. See [Domain Model & API Reference: Release](06-domain-model-api-reference.md#release).
+Immutable snapshot of a project at a specific commit, including all artifacts and Kubernetes resource definitions. See Domain Model: Release.
 
-### Release & Deployment Component
-Platform component managing release creation and environment progression. See [Release & Deployment](05-release-deployment.md).
+### Release Component
+Logical component responsible for creating releases and managing deployments. See Architecture Overview: Component Architecture.
+
+### Release Number
+Auto-incrementing numeric identifier for releases within a project. See Domain Model: Release.
 
 ### Release OCI Image
-OCI image containing release metadata and rendered Kubernetes resources. Format: `[release-registry]/[repository]/[project]:[commit-sha]`. See [Core Architecture: OCI Image Formats](01-core-architecture.md#release-oci-images).
+OCI image containing all Kubernetes resource definitions for a release. Format: `[release-registry]/[repository]/[project]:sha-[commit_sha]`. See System Architecture: OCI Image Formats.
 
 ### ReleasePointer
-Kubernetes custom resource in GitOps repository pointing to a release by commit SHA. See [Core Architecture: GitOps Repository Structure](01-core-architecture.md#gitops-repository-structure).
-
-### Release Trigger
-Condition that initiates release creation (branch push, tag creation, manual). See [Release & Deployment: Trigger Evaluation](05-release-deployment.md#trigger-evaluation).
+Kubernetes resource in the GitOps repository specifying which release is deployed in an environment. See System Architecture: GitOps Repository Structure.
 
 ### Repository
-A GitHub repository containing one or more projects. Part of the canonical triplet. See [Core Architecture: Key Terms](01-core-architecture.md#key-terms).
-
-### Resources Layer
-Layer in Release OCI images containing rendered Kubernetes YAML as tar archive. See [Core Architecture: OCI Image Formats](01-core-architecture.md#release-oci-images).
-
-### Rollback
-Forward deployment of a previous release to an environment. Implemented as redeployment, not true rollback. See [Release & Deployment: Rollback Operations](05-release-deployment.md#rollback-operations).
-
----
-
-## N
-
-### NATS
-Message-oriented middleware providing queuing and request-reply patterns for ephemeral job coordination. See [Execution & Orchestration: NATS Infrastructure](03-execution-orchestration.md#nats-infrastructure).
-
-### Numeric Alias
-Auto-incrementing release identifier per project. Example: Release 42. See [Release & Deployment: Alias System](05-release-deployment.md#alias-system).
-
----
-
-## J
-
-### JetStream
-NATS persistence layer providing guaranteed delivery and work-queue semantics for job distribution. See [Execution & Orchestration: NATS Infrastructure](03-execution-orchestration.md#nats-infrastructure).
-
----
-
-## P
-
-### Pull Consumer
-JetStream consumer where workers explicitly request messages from streams. See [Execution & Orchestration: Job Distribution Pattern](03-execution-orchestration.md#job-distribution-pattern).
-
----
-
-## R
-
-### Request-Reply
-Pattern where workers respond directly to dispatcher requests via NATS inbox subjects. Eliminates polling and intermediate state storage. See [Execution & Orchestration: Request-Reply Pattern](03-execution-orchestration.md#request-reply-pattern).
+A GitHub repository containing one or more projects. Repository configuration defines platform-wide settings. See Developer Guide: Repository Setup.
 
 ---
 
 ## S
 
-### S3 (Simple Storage Service)
-AWS object storage for logs and large job results (>1MB). See [Execution & Orchestration: S3 Storage](03-execution-orchestration.md#s3-storage).
+### Secret Management Contract
+Platform contract defining secret storage and synchronization requirements. See Platform Contracts: Secret Management Contract.
 
-### SBOM (Software Bill of Materials)
-List of software components in an artifact. Generated automatically using Syft. See [Build & Distribution: Artifact Tracking OCI Format](04-build-distribution.md#artifact-tracking-oci-format).
+### Self-Hosting
+Platform deployment model where the platform manages itself through the same mechanisms it provides to applications. See Implementation Guide: Self-Hosting Model.
 
-### Secret Provider
-Pluggable backend for secret resolution. Initial release: AWS Secrets Manager. See [Core Architecture: Secret Providers](01-core-architecture.md#secret-providers).
+### StatefulSet
+Kubernetes workload type used for Worker Service deployment, providing persistent storage and stable identities. See System Architecture: Service Architecture.
 
-### Secret Reference
-Configuration pointer to a secret, never containing the actual value. Uses ports and adapters pattern. See [Core Architecture: Secret Management Patterns](01-core-architecture.md#secret-management-patterns).
+### Stateful XRD
+Crossplane composite resource for services with persistent identity and storage. See Implementation Guide: Infrastructure Abstractions.
 
-### Sequential Phase Execution
-Execution model where phases run one group at a time, with fail-fast on errors. See [Core Architecture: Sequential Phase Execution](01-core-architecture.md#sequential-phase-execution-with-fail-fast).
-
-### Service Account (Keycloak)
-Machine identity for internal service-to-service authentication managed by Keycloak. See [Core Architecture: Internal Services](01-core-architecture.md#authentication-boundaries).
-
-### Single Source of Truth
-Principle where every concept has exactly one authoritative definition. See [Core Architecture: Single Source of Truth](01-core-architecture.md#single-source-of-truth).
-
-
-### Staging Directory
-Temporary filesystem location where producers output artifacts before publishing. Cleaned up after release.
-
-### Step
-Individual task within a phase (e.g., running a specific Earthly target). See [Configuration & Discovery: CI Configuration](02-configuration-discovery.md#project-configuration-schema).
-
-### StepExecution
-Domain entity tracking execution of a single step within a task. See [Domain Model & API Reference: StepExecution](06-domain-model-api-reference.md#stepexecution).
-
-### Syft
-Tool for generating SBOMs from artifacts. Used automatically by platform.
+### Step Execution
+Entity representing execution of a specific step within a task. See Domain Model: StepExecution.
 
 ---
 
 ## T
 
-### Tag Alias
-Release alias derived from Git tag. Format depends on repository tagging strategy. See [Release & Deployment: Alias System](05-release-deployment.md#alias-system).
+### Task Execution
+Entity representing execution of a project's participation in a phase. See Domain Model: TaskExecution.
 
-### Tag-All Strategy
-Tagging strategy where any version tag triggers releases for all projects. See [Configuration & Discovery: Tagging Strategy](02-configuration-discovery.md#repository-configuration-schema).
-
-### Task Pool
-Hot worker pool executing Earthly targets with pre-established connections. See [Execution & Orchestration: Hot Task Pool](03-execution-orchestration.md#hot-task-pool).
-
-### TaskExecution
-Domain entity tracking execution of all steps for a project within a phase. See [Domain Model & API Reference: TaskExecution](06-domain-model-api-reference.md#taskexecution).
-
-### Tracking Image
-See **Artifact OCI Tracking Image**.
-
-### Transit Gateway
-AWS networking service enabling hub-and-spoke topology with centralized routing. See [Platform Infrastructure: Hub-and-Spoke Topology](09-platform-infrastructure.md#hub-and-spoke-topology).
+### Tracking OCI Image
+See Artifact OCI Tracking Image.
 
 ---
 
 ## W
 
-### Worker Pool
-Fleet of persistent pods that execute platform work. Two types: Discovery and Task. See [Execution & Orchestration: Worker Pool Architecture](03-execution-orchestration.md#worker-pool-architecture).
+### Worker Service
+StatefulSets executing asynchronous jobs via NATS JetStream pull consumers, maintaining persistent Git repository caches. See System Architecture: Service Architecture.
 
-### Workflow
-Argo Workflows execution instance representing a pipeline run. See [Execution & Orchestration: Workflow Structure](03-execution-orchestration.md#workflow-structure).
+### Workload Scaling Contract
+Platform contract defining pod and node autoscaling requirements. See Platform Contracts: Workload Scaling Contract.
 
 ---
 
 ## X
 
-### XR (Composite Resource)
-Crossplane Composite Resource - platform abstraction for Kubernetes resources. See [Core Architecture: Key Terms](01-core-architecture.md#key-terms).
-
 ### XRD (Composite Resource Definition)
-Schema defining a Crossplane Composite Resource type. Platform provides XRDs for common patterns.
+Crossplane abstraction defining infrastructure patterns (Deployment, Stateful, Network, Secrets, Database, etc.). See Implementation Guide: Infrastructure Abstractions.
 
 ---
 
-## Acronyms Quick Reference
-
-| Acronym | Full Term | Definition |
-|---------|-----------|------------|
-| API | Application Programming Interface | REST interface for platform services |
-| AWS | Amazon Web Services | Cloud provider for platform infrastructure |
-| CD | Continuous Delivery | Automated deployment process |
-| CI | Continuous Integration | Automated build and test process |
-| CMP | Custom Management Plugin | Argo CD plugin for Release OCI extraction |
-| CNCF | Cloud Native Computing Foundation | Open source foundation (Crossplane, Argo) |
-| CRD | Custom Resource Definition | Kubernetes extension mechanism |
-| DAG | Directed Acyclic Graph | Execution dependency graph |
-| IAM | Identity and Access Management | AWS authentication service |
-| IRSA | IAM Roles for Service Accounts | Kubernetes-AWS integration |
-| KRD | Kubernetes Resource Definition | YAML manifest |
-| OCI | Open Container Initiative | Container image standard |
-| OIDC | OpenID Connect | Authentication protocol |
-| RBAC | Role-Based Access Control | Authorization model |
-| S3 | Simple Storage Service | AWS object storage |
-| SBOM | Software Bill of Materials | Component inventory |
-| SCM | Source Control Management | Git/GitHub |
-| SSO | Single Sign-On | Unified authentication |
-| URI | Uniform Resource Identifier | Resource address |
-| XR | Composite Resource | Crossplane abstraction |
-| XRD | Composite Resource Definition | Crossplane schema |
-
----
-
-## Z
-
-### Zero-Trust Networking
-Security model requiring authentication for all service-to-service communication with default-deny policies. Implemented via Istio Ambient Mode. See [Platform Infrastructure: Zero-Trust Networking Architecture](09-platform-infrastructure.md#zero-trust-networking-architecture).
-
----
-
-**Last Updated**: 2025-10-02
+**Last Updated:** 2025-10-05
