@@ -12,6 +12,7 @@
   - [Abstraction Libraries](#abstraction-libraries)
   - [Domain Logic Libraries](#domain-logic-libraries)
   - [Implementation Libraries](#implementation-libraries)
+  - [Service Integration Libraries](#service-integration-libraries)
 - [Dependency Architecture](#dependency-architecture)
   - [Dependency Layers](#dependency-layers)
   - [Dependency Rules](#dependency-rules)
@@ -21,6 +22,7 @@
   - [Authentication and Authorization](#authentication-and-authorization)
   - [Secret Provider](#secret-provider)
   - [Publisher Interface](#publisher-interface)
+  - [Worker Handler Interface](#worker-handler-interface)
 - [Cross-Cutting Concerns](#cross-cutting-concerns)
   - [Error Handling](#error-handling)
   - [Observability](#observability)
@@ -38,7 +40,7 @@
 
 ## Executive Summary
 
-This document defines the foundation libraries that provide shared functionality across all Catalyst Forge platform services. These libraries, housed in the `catalyst-forge-libs` repository, implement core domain logic, infrastructure abstractions, and utility functions used by the Platform API, Worker Service, and Dispatcher.
+This document defines the foundation libraries that provide shared functionality across all Catalyst Forge platform services. These libraries, housed in the `catalyst-forge-libs` repository, implement core domain logic, infrastructure abstractions, utility functions, and service integration patterns used by the Platform API, Worker Service, and Dispatcher.
 
 The library architecture follows a layered approach with clear dependency rules, ensuring maintainability and testability. All libraries implement the ports and adapters pattern where appropriate, providing clean abstractions with multiple implementations.
 
@@ -46,7 +48,7 @@ The library architecture follows a layered approach with clear dependency rules,
 
 ### Library Organization
 
-Libraries are organized into four categories based on their purpose and dependency requirements:
+Libraries are organized into five categories based on their purpose and dependency requirements:
 
 **Core Libraries:** Foundation types with no dependencies on other platform libraries. These define domain entities, error types, and other fundamental structures.
 
@@ -55,6 +57,8 @@ Libraries are organized into four categories based on their purpose and dependen
 **Domain Logic Libraries:** Implement platform-specific business logic around projects, repositories, and discovery. These orchestrate lower-level libraries to provide higher-level functionality.
 
 **Implementation Libraries:** Provide specific functionality for build tools, artifact management, and specialized operations. These may depend on multiple other library types.
+
+**Service Integration Libraries:** Provide integration with external services and coordination logic for complex workflows. These libraries bridge between domain logic and external systems.
 
 ### Dependency Management
 
@@ -137,17 +141,19 @@ Libraries follow strict dependency rules to prevent circular dependencies and ma
 ---
 
 #### `mq`
-**Purpose:** Message queue abstraction for asynchronous job processing.
+**Purpose:** Message queue abstraction for asynchronous job processing with NATS-specific patterns.
 
 **Responsibilities:**
 - Queue interface definition
-- NATS JetStream implementation
-- Request-reply pattern support
-- Consumer group management
+- NATS JetStream implementation with pull consumers
+- Request-reply pattern with inbox management
+- Consumer group management and lifecycle
+- Stream configuration helpers
 - Message acknowledgment and retry
+- Dead letter queue handling
 
 **Implementations:**
-- `NATSQueue` - NATS JetStream implementation
+- `NATSQueue` - NATS JetStream implementation with full pattern support
 - `MemoryQueue` - In-memory for testing
 
 **Dependencies:** `domain`, `errors`
@@ -174,13 +180,13 @@ Libraries follow strict dependency rules to prevent circular dependencies and ma
 **Responsibilities:**
 - Identity abstraction
 - Authorization decisions ("can identity X do action Y on resource Z")
-- Keycloak integration
+- Token validation and introspection
 - Service account management
-- Token validation
+- Role/permission mapping
 
 **Implementations:**
-- `KeycloakAuthorizer` - Keycloak-based authorization
-- `StaticAuthorizer` - Testing/development
+- `KeycloakAuthorizer` - Full Keycloak integration with OIDC token validation, service accounts, and role mapping
+- `StaticAuthorizer` - Testing/development with hardcoded permissions
 
 **Dependencies:** `errors`
 
@@ -412,6 +418,71 @@ Libraries follow strict dependency rules to prevent circular dependencies and ma
 
 **Dependencies:** `git`, `domain`
 
+### Service Integration Libraries
+
+#### `argo`
+**Purpose:** Argo Workflows integration for pipeline orchestration.
+
+**Responsibilities:**
+- Argo Server REST API client
+- Workflow template generation from discovery output
+- Workflow submission and monitoring
+- Dynamic DAG construction for pipeline phases
+- Workflow status synchronization
+- Result retrieval
+
+**Dependencies:** `domain`, `discovery`, `errors`
+
+---
+
+#### `github`
+**Purpose:** GitHub API integration for platform operations.
+
+**Responsibilities:**
+- GitHub API v3/v4 client wrapper
+- Commit status updates
+- Webhook event parsing and validation
+- GitHub OIDC token validation
+- Repository configuration queries
+- Release and deployment status reporting
+
+**Dependencies:** `domain`, `errors`
+
+---
+
+#### `worker`
+**Purpose:** Core task execution logic for all worker job types.
+
+**Responsibilities:**
+- Job handler interface and registry
+- Handler implementations for all job types:
+  - `DiscoveryHandler` - Repository discovery and DAG generation
+  - `CIHandler` - Earthly target execution and log streaming
+  - `ArtifactHandler` - Producer/publisher orchestration
+  - `ReleaseHandler` - CUE rendering and Release OCI creation
+  - `DeploymentHandler` - GitOps repository updates
+- Result packaging (memory vs S3 based on size)
+- Progress reporting to Platform API
+- Git cache coordination
+- Error classification and retry logic
+
+**Dependencies:** `git`, `discovery`, `execution`, `publishers`, `cue`, `oci`, `provenance`, `gitops`, `fs`, `mq`, `domain`
+
+---
+
+#### `argocd`
+**Purpose:** Argo CD Custom Management Plugin implementation.
+
+**Responsibilities:**
+- ReleasePointer resource parsing
+- Release OCI image fetching from registry
+- Resource layer extraction from OCI image
+- Kubernetes manifest generation
+- Plugin protocol implementation
+- Environment-specific resource filtering
+
+**Dependencies:** `oci`, `domain`, `errors`
+
 ## Dependency Architecture
 
 ### Dependency Layers
@@ -424,9 +495,9 @@ Layer 0 (Foundation):
 
 Layer 1 (Core Abstractions):
 ├── fs                # Filesystem abstraction
-├── mq                # Message queue abstraction
+├── mq                # Message queue abstraction (with NATS patterns)
 ├── database          # Database operations
-├── auth              # Authentication/authorization
+├── auth              # Authentication/authorization (with Keycloak)
 ├── secrets           # Secret management
 └── observability     # Logging, metrics, tracing
 
@@ -446,6 +517,12 @@ Layer 3 (Higher Level Abstractions):
 Layer 4 (Specialized):
 ├── provenance        # Artifact tracking
 └── gitops            # GitOps management
+
+Layer 5 (Service Integration):
+├── argo              # Argo Workflows integration
+├── github            # GitHub API integration
+├── worker            # Worker job execution
+└── argocd            # Argo CD plugin
 ```
 
 ### Dependency Rules
@@ -454,7 +531,7 @@ Layer 4 (Specialized):
 2. **No Circular Dependencies:** Enforced through careful interface design
 3. **Core Isolation:** Core libraries (Layer 0) have no dependencies on other platform libraries
 4. **Interface Dependencies:** Higher layers depend on interfaces, not implementations
-5. **Abstraction Uses Utilities:** Abstraction libraries (like `execution`) can use utility libraries (like `earthly`) internally
+5. **Service Integration:** Layer 5 libraries can depend on any lower layer as they orchestrate complex workflows
 
 ## Key Interfaces
 
@@ -489,6 +566,7 @@ type Queue interface {
     Publish(ctx context.Context, subject string, msg Message) error
     Subscribe(ctx context.Context, subject string) (Subscription, error)
     RequestReply(ctx context.Context, subject string, msg Message, timeout time.Duration) (Message, error)
+    CreateInbox() string
 }
 
 type Consumer interface {
@@ -497,10 +575,16 @@ type Consumer interface {
     Nack(ctx context.Context, msg Message) error
 }
 
+type StreamManager interface {
+    CreateStream(ctx context.Context, config StreamConfig) error
+    CreateConsumer(ctx context.Context, stream string, config ConsumerConfig) (Consumer, error)
+}
+
 type Message struct {
     Subject string
     Data    []byte
     Headers map[string]string
+    Reply   string
 }
 ```
 
@@ -517,6 +601,8 @@ type Identity interface {
 
 type Authorizer interface {
     Authorize(ctx context.Context, identity Identity, action Action) error
+    ValidateToken(ctx context.Context, token string) (Identity, error)
+    CreateServiceAccountToken(ctx context.Context, serviceAccount string) (string, error)
 }
 
 type Action struct {
@@ -568,37 +654,37 @@ type PublishResult struct {
 }
 ```
 
-### Task Execution Interface
+### Worker Handler Interface
 
 ```go
-package execution
+package worker
 
-type Executor interface {
-    // Execute runs a task and streams output
-    Execute(ctx context.Context, task Task, output io.Writer) (*Result, error)
-
-    // ExtractArtifacts retrieves build artifacts after execution
-    ExtractArtifacts(ctx context.Context, task Task) ([]Artifact, error)
+type Handler interface {
+    Type() string
+    Execute(ctx context.Context, job Job) (*Result, error)
 }
 
-type Task struct {
-    Type       string            // "earthly", "docker", "script"
-    Target     string            // Execution target
-    WorkDir    string            // Working directory
-    Env        map[string]string // Environment variables
-    Args       map[string]string // Executor-specific arguments
-    Timeout    time.Duration
+type Job struct {
+    ID          string
+    Type        string
+    Payload     []byte
+    RunID       string
+    Repository  string
+    CommitSHA   string
 }
 
 type Result struct {
-    ExitCode  int
-    StartTime time.Time
-    EndTime   time.Time
-    Cached    bool
+    Success  bool
+    Data     []byte
+    S3Key    string  // For large results
+    Error    error
 }
 
-// Registry function for getting executors
-func GetExecutor(executorType string) (Executor, error)
+// Registry for handler management
+type Registry interface {
+    Register(handler Handler) error
+    Get(jobType string) (Handler, error)
+}
 ```
 
 ## Cross-Cutting Concerns
@@ -648,31 +734,32 @@ type Server struct {
     auth       auth.Authorizer
     queue      mq.Queue
     secrets    secrets.Provider
+    argo       argo.Client
+    github     github.Client
 }
 
 // Worker Service
 type Worker struct {
     queue      mq.Queue
     fs         fs.FS
+    registry   worker.Registry
     publishers map[string]publishers.Publisher
 }
 
-// Worker CI Handler using execution abstraction
-func (w *Worker) ExecuteStep(ctx context.Context, step StepConfig) error {
-    // Get executor based on step action type
-    executor, err := execution.GetExecutor(step.Action)
+// Worker uses registry to execute jobs
+func (w *Worker) ProcessJob(ctx context.Context, msg mq.Message) error {
+    var job worker.Job
+    if err := json.Unmarshal(msg.Data, &job); err != nil {
+        return err
+    }
+
+    handler, err := w.registry.Get(job.Type)
     if err != nil {
-        return fmt.Errorf("unsupported executor: %s", step.Action)
+        return fmt.Errorf("unknown job type: %s", job.Type)
     }
 
-    task := execution.Task{
-        Type:    step.Action,
-        Target:  step.Target,
-        WorkDir: step.WorkDir,
-        Timeout: step.Timeout,
-    }
-
-    return executor.Execute(ctx, task, w.logWriter)
+    result, err := handler.Execute(ctx, job)
+    // Handle result and reply via queue
 }
 ```
 
@@ -717,6 +804,7 @@ Libraries follow semantic versioning:
 - Extended publisher types in `publishers`
 - Alternative secret providers in `secrets`
 - New execution adapters in `execution` (Bazel, Make, Gradle, etc.)
+- Additional worker handlers in `worker` for new job types
 
 ---
 

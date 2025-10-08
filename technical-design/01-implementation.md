@@ -135,6 +135,9 @@ The bootstrap CLI allows testing the most complex integration (self-hosting via 
 ### Phase 1: Infrastructure & XRD Bootstrap
 **Duration: 2 weeks**
 
+**Required Foundation Libraries:**
+- `argocd` - Argo CD Custom Management Plugin for ReleasePointer processing and resource extraction
+
 **Infrastructure Deployment:**
 - OVH bare-metal Kubernetes cluster (3 control, 3 worker nodes)
 - NATS JetStream cluster
@@ -167,6 +170,8 @@ The bootstrap CLI allows testing the most complex integration (self-hosting via 
 - `database` - PostgreSQL connection pooling and query building
 - `execution` - Task execution abstraction with Earthly adapter
 - `provenance` - Full implementation with SBOM generation
+- `argo` - Argo Workflows integration for workflow submission and monitoring
+- `worker` - Job handler interface, registry, and all handler implementations
 
 **Platform API (Minimal):**
 - PostgreSQL schema setup and migrations
@@ -217,6 +222,7 @@ Once this phase is complete, the platform can create its own releases through th
 - `gitops` - GitOps repository management and ReleasePointer updates
 - `secrets` - Additional providers (AWS Secrets Manager, Vault, Kubernetes)
 - `publishers` - Complete suite (Docker, GitHub, PyPI, S3, etc.)
+- `github` - GitHub API integration for webhooks, commit status, and OIDC
 
 **Authentication & Authorization:**
 - Keycloak deployment and configuration
