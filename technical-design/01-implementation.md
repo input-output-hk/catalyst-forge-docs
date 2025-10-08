@@ -5,15 +5,15 @@
 - [Executive Summary](#executive-summary)
 - [Core Concepts](#core-concepts)
   - [Implementation Philosophy](#implementation-philosophy)
+  - [Bootstrap Strategy](#bootstrap-strategy)
   - [Development Methodology](#development-methodology)
   - [Risk Reduction Strategy](#risk-reduction-strategy)
 - [Build Sequence](#build-sequence)
-  - [Phase 0: Foundation Libraries](#phase-0-foundation-libraries)
-  - [Phase 1: Infrastructure Platform](#phase-1-infrastructure-platform)
-  - [Phase 2: Core Services MVP](#phase-2-core-services-mvp)
-  - [Phase 3: Pipeline Execution](#phase-3-pipeline-execution)
-  - [Phase 4: Release Management](#phase-4-release-management)
-  - [Phase 5: Production Hardening](#phase-5-production-hardening)
+  - [Phase 0: Foundation Libraries & Bootstrap CLI](#phase-0-foundation-libraries--bootstrap-cli)
+  - [Phase 1: Infrastructure & XRD Bootstrap](#phase-1-infrastructure--xrd-bootstrap)
+  - [Phase 2: Minimal Platform Core](#phase-2-minimal-platform-core)
+  - [Phase 3: Platform Completion](#phase-3-platform-completion)
+  - [Phase 4: Production Hardening](#phase-4-production-hardening)
 - [Development Environment](#development-environment)
   - [Infrastructure Specifications](#infrastructure-specifications)
   - [Developer Access Model](#developer-access-model)
@@ -30,202 +30,270 @@
 
 ## Executive Summary
 
-This document defines the implementation strategy for building the Catalyst Forge platform from concept to initial production deployment. The strategy follows a production-first development approach, deploying real infrastructure early and developing services directly against it.
+This document defines the implementation strategy for building the Catalyst Forge platform from concept to initial production deployment. The strategy employs a bootstrap-first approach using a temporary CLI to establish the platform's self-hosting capabilities before building the full system.
 
-The implementation progresses through six phases, building from foundational libraries through to production-ready services. Each phase delivers working components that validate architectural decisions and reduce integration risk.
+The implementation progresses through five phases, starting with a bootstrap CLI that validates the core release and GitOps patterns, then transitioning to the full platform once self-management is proven. This approach validates the most complex architectural patterns early while building reusable components.
 
-Total estimated timeline: 16-20 weeks from start to initial production readiness.
+Total estimated timeline: 14-16 weeks from start to initial production readiness.
 
 ## Core Concepts
 
 ### Implementation Philosophy
 
-**Production-First Development**
-Deploy real infrastructure on OVH bare-metal servers from the beginning. Develop and test all services against this production-like environment rather than local mocks or simulations. This approach validates infrastructure assumptions immediately and prevents late-stage integration surprises.
+**Bootstrap-First Development**
+Build a temporary CLI that can create releases and manage XRDs, enabling the platform to be deployed via its own GitOps patterns from the beginning. This validates the self-hosting model before committing to the full platform architecture.
+
+**Production Infrastructure Early**
+Deploy real infrastructure on OVH bare-metal servers from the beginning. All development and testing happens against production-like infrastructure to validate assumptions immediately.
 
 **Walking Skeleton Pattern**
-Build a minimal end-to-end system that exercises all architectural layers before adding features. The skeleton includes real NATS messaging, real PostgreSQL persistence, real Kubernetes workloads, and real GitOps deployments. Features are added to this working skeleton iteratively.
+Build a minimal end-to-end system that exercises all architectural layers before adding features. The skeleton includes real NATS messaging, real PostgreSQL persistence, real Kubernetes workloads, and real GitOps deployments.
 
-**Contract-Driven Development**
-Define and implement infrastructure contracts (ports) and their adapters early. Services depend only on contracts, enabling parallel development once contracts stabilize. This aligns with the platform's ports and adapters architecture.
+### Bootstrap Strategy
+
+The platform faces a fundamental bootstrapping challenge: it needs to deploy itself using the same GitOps patterns it provides to applications, but those patterns are produced by the platform itself.
+
+The solution is a temporary bootstrap CLI that implements just enough functionality to:
+1. Create Crossplane packages (xpkg) for platform XRDs
+2. Generate artifact OCI tracking images
+3. Create Release OCI images containing Kubernetes resources
+4. Publish all artifacts to registries
+
+This CLI enables manual creation of the initial release pointer files, allowing Argo CD to deploy the platform using the same Custom Management Plugin that will later manage applications. Once the minimal platform is operational, it takes over these responsibilities and the CLI is retired.
 
 ### Development Methodology
 
-**Bottom-Up Construction**
-Build from the lowest abstraction layers upward:
-1. Libraries and contracts
-2. Infrastructure and platform operators
-3. Core services
-4. Integration layers
-5. User-facing features
-
 **Incremental Validation**
-Each phase must demonstrate working functionality before proceeding. No big-bang integration—every component integrates as soon as it's built.
+Each phase must demonstrate working functionality before proceeding. The bootstrap CLI validates GitOps patterns, the minimal platform validates core workflows, then additional features are layered on the working foundation.
+
+**Component Reuse**
+Code written for the bootstrap CLI (artifact creation, release packaging, CUE evaluation) directly transfers to the Worker Service, making the temporary CLI a valuable investment rather than throwaway code.
 
 **Single Environment Focus**
 Initially target only the on-premises profile on OVH infrastructure. AWS profile implementation deferred to avoid complexity multiplication during initial development.
 
 ### Risk Reduction Strategy
 
-Identify and validate high-risk architectural decisions early:
-- StatefulSet Git caching performance
-- NATS JetStream ephemeral messaging reliability
+Validate high-risk architectural decisions early through the bootstrap process:
+- GitOps self-management via Release OCI images
+- Argo CD Custom Management Plugin resource extraction
 - Crossplane XRD composition complexity
-- Worker job timeout and retry patterns
+- NATS request-reply messaging patterns
+- StatefulSet Git caching performance
 
-Fail fast on architectural issues while the system is still malleable.
+The bootstrap CLI allows testing the most complex integration (self-hosting via releases) before building supporting infrastructure.
 
 ## Build Sequence
 
-### Phase 0: Foundation Libraries
-**Duration: 2 weeks**
-
-**Deliverables:**
-- CUE schema definitions for all configuration structures
-- Go SDK for platform domain models (matching Domain Model entities)
-- Contract interfaces for all 11 platform contracts
-- Message schemas for NATS communication
-- Common error types and handling patterns
-
-**Validation:**
-- Unit tests for all libraries
-- Schema validation test suite
-- Contract compliance test harness
-
-### Phase 1: Infrastructure Platform
+### Phase 0: Foundation Libraries & Bootstrap CLI
 **Duration: 3 weeks**
 
-**Deliverables:**
-- OVH bare-metal Kubernetes cluster (3 control, 3 worker nodes)
-- On-premises adapter deployments:
-  - MinIO for object storage
-  - Harbor for container registry
-  - CloudNativePG for PostgreSQL
-  - NATS JetStream cluster
-  - Vault for secrets (or Kubernetes secrets for MVP)
-- Essential platform operators:
-  - Argo CD (GitOps foundation)
-  - Crossplane with providers
-  - External DNS
-  - cert-manager
-  - Istio Ambient Mode (deferred to Phase 5 for simplicity)
+**Required Foundation Libraries (Full Implementation):**
+- `domain` - All entity definitions (Release, Artifact, PipelineRun, etc.)
+- `errors` - Error types and classification
+- `schemas` - Generated Go types from CUE schemas
+- `fs` - Local and S3/MinIO implementations for file operations
+- `git` - Repository cloning, fetching, and worktree management
+- `repository` - Repository configuration parsing (`repo.cue`)
+- `project` - Project configuration parsing (`project.cue`)
+- `discovery` - Project traversal and DAG construction
+- `cue` - CUE evaluation and Kubernetes resource rendering
+- `oci` - OCI image manipulation and registry operations
+- `earthly` - Earthfile parsing for target dependency analysis
+
+**Required Foundation Libraries (Minimal Implementation):**
+- `secrets` - StaticProvider only (environment variables for registry credentials)
+- `publishers` - OCI publisher only (for pushing Release and Artifact OCI images)
+- `provenance` - Basic artifact tracking image creation (metadata layer, no SBOM initially)
+
+**Deferred Foundation Libraries (Not Needed Yet):**
+- `mq` - NATS messaging (Phase 2)
+- `database` - PostgreSQL operations (Phase 2)
+- `auth` - Authentication/authorization (Phase 3)
+- `observability` - Logging/metrics/tracing (Phase 3)
+- `execution` - Task execution abstraction (Phase 2)
+- `gitops` - GitOps repository management (Phase 3)
+- Additional publishers beyond OCI (Phase 3)
+
+**Bootstrap CLI (`forge-bootstrap`):**
+- Repository discovery using `discovery` library
+- Configuration parsing using `repository` and `project` libraries
+- CUE evaluation using `cue` library
+- Crossplane package (xpkg) creation
+- Artifact OCI tracking image generation using minimal `provenance`
+- Release OCI image packaging with resource layer
+- Registry push using `oci` and minimal `publishers`
+- Static credential management via environment variables
 
 **Validation:**
-- Successful Argo CD app-of-apps deployment
-- Working Crossplane composition (simple test XRD)
-- NATS cluster forming and accepting connections
-- Object storage read/write verification
+- Unit tests for all required libraries
+- CLI can successfully create XRD packages
+- CLI generates valid Release OCI images with artifact references
+- Artifact tracking images include required metadata
+- Manual test of Argo CD CMP extracting resources from Release OCI
 
-**Note:** Istio Ambient Mode deployment deferred to Phase 5 to reduce initial complexity. Use simple Kubernetes Ingress or port-forwarding for development access until then.
+### Phase 1: Infrastructure & XRD Bootstrap
+**Duration: 2 weeks**
 
-### Phase 2: Core Services MVP
+**Infrastructure Deployment:**
+- OVH bare-metal Kubernetes cluster (3 control, 3 worker nodes)
+- NATS JetStream cluster
+- PostgreSQL (CloudNativePG)
+- MinIO for object storage
+- Harbor for container registry
+- Argo CD with app-of-apps pattern
+- Crossplane with providers
+
+**XRD Bootstrap Process:**
+1. Write platform XRDs in `catalyst-forge-xrds` repository
+2. Use bootstrap CLI to create xpkg packages
+3. Use bootstrap CLI to create Release OCI for XRDs
+4. Manually create ReleasePointer files in GitOps repository
+5. Deploy Argo CD Custom Management Plugin
+6. Configure Argo CD applications to use CMP
+7. Verify XRDs deploy successfully via GitOps
+
+**Validation:**
+- Argo CD successfully extracts resources from Release OCI
+- Crossplane accepts and reconciles platform XRDs
+- Basic XRD can create a test resource
+- GitOps repository structure established
+
+### Phase 2: Minimal Platform Core
 **Duration: 4 weeks**
+
+**Complete Deferred Foundation Libraries:**
+- `mq` - NATS JetStream implementation for message queue abstraction
+- `database` - PostgreSQL connection pooling and query building
+- `execution` - Task execution abstraction with Earthly adapter
+- `provenance` - Full implementation with SBOM generation
 
 **Platform API (Minimal):**
 - PostgreSQL schema setup and migrations
-- Keycloak integration for authentication
-- Essential endpoints:
+- Core endpoints (no authentication initially):
   - `POST /v1/runs` (create pipeline run)
   - `GET /v1/runs/{id}` (get status)
-  - Health/readiness endpoints
-- Domain entity management (PipelineRun only)
+  - Internal status update endpoints for workers
+- Entity management (PipelineRun, Release, Deployment)
+- Argo Workflow submission
 
-**Worker Service (Single Type):**
-- Discovery worker implementation
-- Git repository caching mechanism
-- NATS consumer pattern implementation
-- Result storage to S3/MinIO
+**Worker Service:**
+- All job handlers in single StatefulSet initially:
+  - Discovery handler (repository traversal, CUE parsing)
+  - CI handler (Earthly execution using `execution` library)
+  - Artifact handler (producer/publisher orchestration, full `provenance`)
+  - Release handler (reusing bootstrap CLI logic)
+- NATS pull consumer implementation using `mq` library
+- Request-reply pattern
+- Git repository caching using `git` library
+- Object storage for results/logs using `fs` library
 
 **Dispatcher:**
-- Basic job submission to NATS
-- Request-reply correlation
+- Job submission to NATS using `mq` library
+- Reply correlation
 - Timeout handling
+- Result return to Argo Workflows
+
+**Argo Workflows:**
+- Workflow engine deployment
+- Basic workflow templates
+- Integration with dispatcher pods
+
+**Transition Point:**
+Once this phase is complete, the platform can create its own releases through the normal pipeline flow. The bootstrap CLI is no longer needed.
 
 **Validation:**
-- Manual pipeline run creation via API
-- Discovery job execution end-to-end
-- Git cache persistence across pod restarts
-- Result retrieval from object storage
+- Manual pipeline trigger creates a Release
+- Release OCI image matches bootstrap CLI output
+- Worker handlers successfully process all job types
+- End-to-end flow from API to Release creation
 
-### Phase 3: Pipeline Execution
+### Phase 3: Platform Completion
 **Duration: 4 weeks**
 
-**Argo Workflows Integration:**
-- Workflow template generation from discovery
-- Dynamic task DAG construction
-- Dispatcher pod specifications
+**Complete Remaining Foundation Libraries:**
+- `auth` - Full Keycloak integration and authorization
+- `observability` - Structured logging, metrics, and tracing
+- `gitops` - GitOps repository management and ReleasePointer updates
+- `secrets` - Additional providers (AWS Secrets Manager, Vault, Kubernetes)
+- `publishers` - Complete suite (Docker, GitHub, PyPI, S3, etc.)
 
-**Worker Service Extensions:**
-- CI worker implementation (Earthly execution)
-- Artifact worker implementation
-- Log streaming to object storage
-- Worker autoscaling via KEDA
+**Authentication & Authorization:**
+- Keycloak deployment and configuration
+- Platform API authentication middleware using `auth` library
+- Service account creation for workers
+- GitHub OIDC federation
 
-**Platform API Extensions:**
-- GitHub webhook ingestion
-- Pipeline phase/task/step status tracking
-- GitHub commit status updates
-- Internal service-to-service authentication
+**GitHub Integration:**
+- Webhook ingestion
+- Commit status updates
+- OIDC token exchange
 
-**Validation:**
-- Complete pipeline execution from GitHub push
-- Earthly target execution in workers
-- Log accessibility via presigned URLs
-- Worker scaling based on queue depth
+**Worker Service Separation:**
+- Split into specialized StatefulSets:
+  - `worker-discovery` (light resources)
+  - `worker-ci` (heavy CPU/memory)
+  - `worker-artifact` (network I/O focused)
+  - `worker-release` (moderate resources)
+- KEDA autoscaling per worker type
+- Resource optimization per workload
+- Integration with `observability` library for metrics/logging
 
-### Phase 4: Release Management
-**Duration: 3 weeks**
-
-**Release Creation:**
-- CUE to Kubernetes YAML rendering
-- Release OCI image packaging
-- Artifact OCI tracking image creation
-- Release trigger evaluation
-
-**Deployment Orchestration:**
-- GitOps repository management
-- ReleasePointer updates
-- Argo CD Custom Management Plugin
-- Environment-specific configurations
-
-**Platform API Extensions:**
-- Release endpoints
+**Enhanced Platform API:**
+- Complete REST API surface
+- Event emission
+- Pipeline phase/task/step tracking
+- Release management endpoints
 - Deployment endpoints
-- Approval workflows
+- Integration with `gitops` library for automated pointer updates
+
+**Additional Platform Operators:**
+- External DNS
+- External Secrets Operator (integrated with `secrets` library)
+- cert-manager
+- Observability stack (Grafana Alloy)
 
 **Validation:**
-- Release creation from successful pipeline
-- Deployment to development environment
-- Resource extraction from Release OCI
-- EnvironmentConfig value injection
+- GitHub push triggers pipeline automatically
+- Authentication required for all API access
+- Workers scale based on load
+- Complete platform self-management via GitOps
+- All publisher types functional
+- Secrets synchronized from external providers
 
-### Phase 5: Production Hardening
+### Phase 4: Production Hardening
 **Duration: 2 weeks**
 
-**Observability:**
-- Grafana Alloy configuration
-- Platform dashboards
-- Alert rules
-- Distributed tracing setup
-
-**Service Mesh & Ingress:**
+**Service Mesh:**
 - Istio Ambient Mode deployment
-- Gateway API configuration for ingress
+- Gateway API configuration
 - Service authorization policies
-- mTLS verification for all cluster traffic
-- Unified traffic management (north-south and east-west)
+- mTLS verification
+
+**Observability:**
+- Metrics collection and dashboards
+- Log aggregation
+- Distributed tracing
+- Alert rules
 
 **Reliability:**
 - Circuit breakers
 - Retry policies
 - Rate limiting
 - Resource quotas
+- Backup and restore procedures
+
+**Performance:**
+- Load testing (100 concurrent pipelines)
+- Cache optimization
+- Database query optimization
+- Network policy tuning
 
 **Validation:**
-- Load testing (100 concurrent pipelines)
-- Failure injection testing
-- Recovery time verification
-- Security scanning
+- Platform can manage its own upgrades
+- Recovery from component failures < 2 minutes
+- 99% pipeline success rate under load
+- Security scanning passes
 
 ## Development Environment
 
@@ -258,148 +326,146 @@ Shared Storage:
 
 ### Developer Access Model
 
-**Direct Cluster Access:**
+**Bootstrap Phase:**
+- Direct kubectl access for manual operations
+- Bootstrap CLI runs from developer workstations
+- Manual GitOps repository management
+
+**Post-Bootstrap:**
 - Individual namespaces per developer
 - RBAC for namespace isolation
 - Shared platform services
 - Individual GitOps application instances
 
-**Development Workflow:**
-1. Push service changes to feature branch
-2. Update Argo CD Application to track feature branch
-3. Test against real infrastructure
-4. Merge to main for "production" deployment
-
 ### Testing Strategy
 
+**Bootstrap Validation:**
+- Manual testing of Release OCI format
+- Argo CD CMP extraction verification
+- XRD deployment confirmation
+
 **Integration Testing:**
-- Real NATS messaging
-- Real PostgreSQL persistence
-- Real object storage
+- Real infrastructure for all tests
 - No mocks for platform contracts
+- End-to-end pipeline execution
+- GitOps deployment verification
 
 **Load Testing:**
 - Gradual load increase on real cluster
 - Monitor resource utilization
 - Identify bottlenecks early
 
-**Chaos Testing (Phase 5):**
-- Pod deletion
-- Network partitioning
-- Node failures
-- Storage exhaustion
-
 ## Integration Points
 
 ### Critical Path Dependencies
 
+**Phase 0 → Phase 1:**
+- Bootstrap CLI must successfully create releases
+- Release OCI format must be valid
+
 **Phase 1 → Phase 2:**
-- Working Kubernetes cluster
-- Functional NATS JetStream
-- Available PostgreSQL
+- Argo CD CMP must extract resources correctly
+- XRDs must be deployed via GitOps
+- Infrastructure must be stable
 
 **Phase 2 → Phase 3:**
-- Platform API authentication
-- Worker NATS consumption
-- Object storage for logs
-
-**Phase 3 → Phase 4:**
-- Complete pipeline execution
-- Artifact creation
-- Earthly integration
+- Platform must create releases matching CLI output
+- Core workflow must be validated
+- Self-management must be proven
 
 ### External Service Requirements
 
 **Required from Day 1:**
 - GitHub repository access
-- DNS provider (Cloudflare/other)
+- OVH infrastructure access
+- DNS provider account
 - Container registry (Harbor)
 
-**Required by Phase 3:**
-- GitHub API access (commit status)
-- GitHub OIDC provider
+**Required by Phase 2:**
+- NATS JetStream cluster
+- PostgreSQL database
+- MinIO object storage
 
-**Required by Phase 4:**
-- GitOps repository
-- Additional environments (can be namespaces initially)
+**Required by Phase 3:**
+- GitHub API access (webhooks, status)
+- GitHub OIDC provider
+- External identity provider (optional)
 
 ## Success Criteria
 
 ### Phase Validation
 
+**Phase 0 Success:**
+- Bootstrap CLI creates valid xpkg files
+- Bootstrap CLI generates Release OCI images
+- Libraries have comprehensive test coverage
+
 **Phase 1 Success:**
-- Argo CD can deploy applications
-- Crossplane can create resources
-- Platform operators healthy
-- Base infrastructure stable for 48 hours
+- Platform XRDs deployed via GitOps
+- Argo CD CMP extracts resources from Release OCI
+- Infrastructure stable for 48 hours
+- Manual ReleasePointer updates trigger deployments
 
 **Phase 2 Success:**
-- API accepts authenticated requests
-- Worker processes discovery job
-- Results retrievable from storage
-- No message loss under normal operation
+- Pipeline creates Release without bootstrap CLI
+- All job types execute successfully
+- NATS request-reply pattern works reliably
+- Platform can update itself via GitOps
 
 **Phase 3 Success:**
-- GitHub push triggers pipeline
-- All phases execute in sequence
-- Logs accessible via API
+- GitHub integration fully automated
+- Authentication protects all endpoints
 - Workers scale with load
+- Complete API surface available
 
 **Phase 4 Success:**
-- Releases created automatically
-- Deployments successful to dev environment
-- Resources correctly rendered
-- GitOps loop closed
-
-**Phase 5 Success:**
 - 99% pipeline success rate under load
-- Recovery from component failures < 2 minutes
-- All traffic encrypted via mTLS (both ingress and service-to-service)
-- Gateway API handling external traffic through Istio
+- Recovery from failures < 2 minutes
+- All traffic encrypted via mTLS
 - Observability data flowing
 
 ### Integration Milestones
 
-1. **First Discovery:** Worker successfully discovers projects in repository
-2. **First Pipeline:** Complete pipeline execution from trigger to completion
-3. **First Release:** Release OCI created and registered
-4. **First Deployment:** Application running from GitOps deployment
-5. **First Production Pipeline:** 100 concurrent pipelines successfully completed
+1. **First Bootstrap Release:** CLI creates platform's own Release OCI
+2. **First GitOps Deployment:** Platform deploys itself from Release
+3. **First Pipeline Release:** Platform creates Release through pipeline
+4. **First Self-Update:** Platform updates itself via its own pipeline
+5. **First Application:** External application deployed via platform
 
 ## Risk Mitigation
 
 ### Technical Risks
 
-**Risk: StatefulSet Git caching doesn't perform as expected**
-- **Mitigation:** Build cache layer abstraction early, test with large repositories
-- **Fallback:** Switch to shared cache via Redis or distributed filesystem
+**Risk: Release OCI format incompatibility with Argo CD CMP**
+- **Mitigation:** Test CMP extraction with bootstrap CLI output early
+- **Fallback:** Adjust OCI layer structure to match CMP requirements
+
+**Risk: Bootstrap CLI logic doesn't transfer to Worker Service**
+- **Mitigation:** Design CLI with clear separation of concerns
+- **Fallback:** Refactor during Phase 2 if necessary
+
+**Risk: Self-hosting creates circular dependencies**
+- **Mitigation:** Bootstrap CLI breaks the cycle initially
+- **Fallback:** Maintain manual deployment option for platform core
 
 **Risk: NATS ephemeral approach causes job loss**
-- **Mitigation:** Implement robust timeout/retry patterns in Phase 2
-- **Fallback:** Add persistence to NATS or switch to durable message queue
+- **Mitigation:** Implement robust timeout/retry patterns early
+- **Fallback:** Add persistence to NATS if required
 
-**Risk: Crossplane composition complexity**
-- **Mitigation:** Start with simple XRDs, add complexity incrementally
-- **Fallback:** Generate raw Kubernetes manifests if composition proves unwieldy
-
-**Risk: OVH infrastructure constraints**
-- **Mitigation:** Test infrastructure limits early in Phase 1
-- **Fallback:** Design for hybrid deployment with some cloud services
-
-**Risk: Worker job isolation issues**
-- **Mitigation:** Implement strong isolation boundaries from start
-- **Fallback:** One worker pod per job if necessary
+**Risk: StatefulSet Git caching doesn't perform**
+- **Mitigation:** Test with large repositories in Phase 2
+- **Fallback:** Shared cache via Redis or distributed filesystem
 
 ### Mitigation Strategies
 
-**Architectural Flexibility:**
-Keep contract interfaces stable while allowing adapter implementations to evolve. This enables infrastructure changes without service modifications.
+**Incremental Validation:**
+Test each architectural decision as soon as possible. The bootstrap CLI validates GitOps patterns before building the full platform.
 
-**Feature Flags:**
-Build feature toggle system early to enable/disable functionality without deployments.
+**Component Reuse:**
+Bootstrap CLI code transfers directly to Worker Service, ensuring early work provides lasting value.
 
 **Rollback Capability:**
-Every change through GitOps is revertible. Test rollback procedures regularly.
+GitOps enables easy rollback. Platform can always be redeployed from previous Release if updates fail.
 
 **Monitoring First:**
 Deploy observability before services. Never fly blind during development.
@@ -409,9 +475,9 @@ Deploy observability before services. Never fly blind during development.
 **Related Documents:**
 - Architecture Overview - System design and principles
 - Platform Contracts - Infrastructure requirements
-- Implementation Guide - Deployment profiles and configuration
-- Developer Guide - Configuration patterns and workflows
+- Foundation Libraries - Shared code structure
+- Developer Guide - Configuration patterns
 
-**Timeline:** 16-20 weeks from start to initial production readiness
+**Timeline:** 14-16 weeks from start to initial production readiness
 
-**Last Updated:** 2025-10-05
+**Last Updated:** 2025-10-07
