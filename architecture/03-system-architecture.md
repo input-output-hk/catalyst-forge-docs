@@ -457,14 +457,11 @@ ReleasePointer resources specify the deployed release via commit SHA in `spec.re
 
 **Argo CD Integration:**
 
-Custom Management Plugin processes ReleasePointers:
-1. Read ReleasePointer from Git
-2. Extract `spec.release` commit SHA
-3. Fetch Release OCI image using SHA
-4. Extract resources layer (tar archive of YAML)
-5. Return resources to Argo CD for application
+Custom Management Plugin processes ReleasePointers by reading the commit SHA from `spec.release`, fetching the corresponding Release OCI image, extracting the resources layer, and returning manifests to Argo CD for application.
 
 Single repository enables unified access control and audit logging. Environment-first hierarchy separates concerns by deployment target. Pointer indirection decouples Git commits from release versions. Canonical SHA ensures deployment reproducibility.
+
+> **Implementation Details:** See [GitOps Deployment](../technical-design/03-gitops-deployment.md) for detailed plugin mechanics, OCI extraction algorithms, and ReleasePointer processing implementation.
 
 ## Integration Points
 

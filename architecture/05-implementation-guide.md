@@ -430,58 +430,45 @@ The platform provides Crossplane Composite Resources (XRDs) that abstract common
 
 All XRDs support output publishing through `status.outputs.*` for public values and connection-details Secrets for sensitive values. This enables XRDs to act as producers and consumers in a dependency graph.
 
+> **Implementation Details:** See [Composition Management](../technical-design/04-composition-management.md) for XRD versioning, schema evolution, and compatibility management strategies.
+
 See Developer Guide: Crossplane XRDs and Deployment Configuration for complete usage patterns and configuration examples.
 
 ### Environment Configuration Model
 
 The platform uses Crossplane EnvironmentConfigs to provide environment-specific configuration at deployment time, enabling environment-agnostic releases.
 
-**Two-Tier Configuration:**
+**Configuration Hierarchy:**
 
-**Cluster-Wide Configuration:** Stored in `<env>/env.yml` in GitOps repository
-- Environment identification (name, domain, region)
-- Platform conventions (secret prefixes, storage classes)
+Applications access configuration from two sources: cluster-wide settings (stored in `<env>/env.yml`) and per-project overrides (stored in `<env>/<repo>-<project>/env.yml`). The platform resolves configuration values through a defined precedence order that prioritizes specific overrides while providing reasonable defaults.
+
+**Key Capabilities:**
+- Environment identification and platform conventions
 - Resource defaults per workload type
-- Environment-wide feature flags
+- Workload-specific tuning and overrides
+- Feature toggles at environment and project level
 
-**Per-Project Configuration:** Stored in `<env>/<repo>-<project>/env.yml` in GitOps repository
-- Workload-specific tuning (replicas, resources)
-- Schedule modifications for CronJobs
-- Feature toggles per project
-- Temporary overrides
-
-**Resolution Precedence:**
-1. Per-project override (specific overrides for named XRD instances)
-2. XRD spec value (developer-specified configuration)
-3. Cluster-wide default (environment-level defaults)
-4. Composition default (hardcoded fallbacks)
-
-This precedence ensures predictable behavior: developers specify intent, environment configs apply context-specific defaults, and compositions provide reasonable fallbacks.
+> **Implementation Details:** See [Environment Configuration](../technical-design/05-environment-configuration.md) for the complete resolution algorithm, precedence order, merge strategies, and integration with composition functions.
 
 ### Reference Resolution Pattern
 
-The platform provides a universal reference pattern for accessing values from other XRDs:
+The platform provides a universal reference pattern for accessing values from other XRDs.
 
-**Reference Types:**
+**Reference Syntax:**
 
-`outputs/<xr>/<key>` - Literal value inlined from any XR's `status.outputs.*`
-
-`connections/<xr>/<key>` - Reference to any XR's connection-details Secret (secretKeyRef)
-
-`secrets/<xr>/<secret>/[key]` - Reference to secret from Secrets XRD (secretKeyRef)
-
-`configs/<xr>/<config>/[key]` - Reference to ConfigMap from ConfigMaps XRD (configMapKeyRef)
+Applications reference values using path-based syntax: `outputs/<xr>/<key>`, `connections/<xr>/<key>`, `secrets/<xr>/<secret>/[key]`, and `configs/<xr>/<config>/[key]`. Each reference type provides different capabilities and security characteristics.
 
 **Security Model:**
-- `outputs/` returns literal values (treated as public, safe to log)
-- All other reference types return Kubernetes references (secretKeyRef/configMapKeyRef)
+- Output references return literal values (public, safe to log)
+- Connection, secret, and config references return Kubernetes resource references (secretKeyRef/configMapKeyRef)
 - Sensitive values never inlined, always referenced
 
-**Cross-Namespace References:**
-- `<repository>-<project>::outputs/<xr>/<key>` for cross-project references
-- `platform::outputs/<xr>/<key>` for platform-managed resources
-- Only `outputs/` supports cross-namespace references
-- `secrets/` and `configs/` limited to same namespace
+**Namespace Scoping:**
+- Cross-namespace references supported for outputs via `<namespace>::outputs/<xr>/<key>` syntax
+- Secrets and configs limited to same namespace for security
+- Platform resources accessible via `platform::` prefix
+
+> **Implementation Details:** See [Environment Configuration](../technical-design/05-environment-configuration.md) for the reference resolution algorithm, parsing implementation, lookup mechanisms, and error handling for each reference type.
 
 See Developer Guide: Reference Resolution for complete syntax and examples.
 
