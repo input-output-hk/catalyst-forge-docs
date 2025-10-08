@@ -533,6 +533,66 @@ func TestValidateConfig(t *testing.T) {
 }
 ```
 
+### Test behavior, not implementation
+
+**Goal.** Write tests that specify the *observable contract* of a package (inputs → outputs, effects, errors), not how the code is written today. Tests should keep passing when you refactor internals but preserve the public behavior. Over-specifying implementation details leads to brittle tests that break for non-behavioral changes.
+
+**What this means in practice**
+
+* **Prefer black-box tests on exported APIs.** Exercise functions and types the way real callers do. Avoid reaching into internal state or private helpers unless you’re pinning a documented invariant that isn’t observable otherwise.
+* **Don’t test constructors that only return defaults.** If `New` has no inputs and just initializes defaults, skip a dedicated test. Validate behavior via tests that use the returned value in real operations (the defaults get covered implicitly).
+* **Use table-driven tests for input/output behavior.** Capture many cases with a single loop; keep the table (inputs, expected outputs/errors) separate from the assertion logic.
+* **Minimize mocks; mock only stable, external contracts.** Heavy mocking leaks implementation details into tests and increases maintenance cost when internals change. Prefer fakes/stubs at package boundaries.
+* **Express intent in assertions.** Assert *properties* you care about (e.g., “set is order-independent,” “ID is non-empty”) rather than reconstructing internal structures field-by-field when not required. This reduces brittleness.
+* **Use fuzz/property-based tests for invariants and parsers.** When a behavior is best described as “always true,” write a property and add a Go fuzz test to explore edge cases automatically.
+
+**Smells that signal over-coupled tests**
+
+* Asserting exact internal fields that the API never promises (e.g., checking every default in `New` instead of observing behavior).
+* Tests that fail after harmless refactors (renames, reordering, changing an internal data structure) with no functional change.
+* Excessive mocking of internal calls or setting expectations on call sequences that aren’t part of the public contract.
+
+**Recommended patterns**
+
+* **Table-driven unit tests** for deterministic functions.
+* **Behavioral integration tests** across a few key seams to validate wiring without overspecifying internals.
+* **Fuzz tests** for decoders, validators, and sanitizers to uncover edge cases your tables miss.
+
+**Example (concise)**
+
+Bad (implementation-coupled):
+
+```go
+func TestNewClient_Defaults(t *testing.T) {
+    c := NewClient()
+    if c.retryCount != 3 || c.timeout != 5*time.Second || c.logger.prefix != "[client]" {
+        t.Fatalf("unexpected defaults: %#v", c)
+    }
+}
+```
+
+Good (behavioral):
+
+```go
+func TestClient_RetriesAndTimeout(t *testing.T) {
+    ctx := context.Background()
+    server := flakyServer(fails: 2) // 3rd attempt succeeds
+    c := NewClient()                // defaults exercised implicitly
+
+    got, err := c.Get(ctx, server.URL)
+    if err != nil { t.Fatal(err) }
+    if got.StatusCode != http.StatusOK { t.Fatalf("want 200, got %d", got.StatusCode) }
+}
+```
+
+This test still passes if you refactor how `NewClient` stores defaults, as long as the *contract* (“retries, and the call eventually succeeds within the default timeout”) holds.
+
+**Checklist before you commit a test**
+
+* Am I asserting **what the API promises**, not how it’s built?
+* Could a simple refactor break this test with no user-visible change? If yes, rethink the assertion.
+* Would a **table** or **fuzz** test express this better and cover more ground?
+
 ### Fuzz Testing
 
 **Add fuzz tests for parsers and validators** that handle untrusted input.
